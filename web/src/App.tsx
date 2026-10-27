@@ -293,17 +293,7 @@ export default function App() {
       zoomControl: true
     });
 
-    // 1. Full-Color Physical/Political World Map (Clear Continents, Blue Oceans, Country Borders)
-    const continentsLayer = L.tileLayer(
-      'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-      {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-        subdomains: 'abcd',
-        maxZoom: 19
-      }
-    );
-
-    // 2. Real Satellite World Imagery of Earth from Space
+    // 1. Real Satellite World Imagery of Earth from Space
     const satelliteLayer = L.tileLayer(
       'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
       {
@@ -312,7 +302,7 @@ export default function App() {
       }
     );
 
-    // 3. Topographic World Map
+    // 2. Topographic World Map
     const topoLayer = L.tileLayer(
       'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
       {
@@ -321,13 +311,12 @@ export default function App() {
       }
     );
 
-    // Add continentsLayer as primary default map
-    continentsLayer.addTo(map);
+    // Add satelliteLayer as primary default map
+    satelliteLayer.addTo(map);
 
     // Add interactive layer selector in top-right
     L.control.layers(
       {
-        "🗺️ Mapa Continentes y Países": continentsLayer,
         "🛰️ Satélite Planeta Tierra": satelliteLayer,
         "⛰️ Relieve y Topografía": topoLayer
       },
