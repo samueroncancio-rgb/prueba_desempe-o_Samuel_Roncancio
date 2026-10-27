@@ -28,14 +28,18 @@ services:
   # 2. S3 Object Storage (DATA LAKE - BRONZE & SILVER LAYERS)
   # ==============================================================================
   minio:
-    image: adobe/s3mock:latest
+    image: cgr.dev/chainguard/minio:latest
     container_name: sismowatch_minio
     restart: always
     environment:
-      initialBuckets: sismowatch-bronze,sismowatch-silver,sismowatch-gold
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-miniopassword2026}
+    command: server /data --console-address ":9001"
     ports:
-      - "9000:9090"
-      - "9001:9090"
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
     networks:
       - sismowatch_net
 
@@ -86,7 +90,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-sismowatch_admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sismowatch_secure_pass_2026}
       DB_SPARK_PASS: ${DB_SPARK_PASS:-spark_etl_secure_pass_2026}
-      MINIO_ENDPOINT: minio:9090
+      MINIO_ENDPOINT: minio:9000
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-miniopassword2026}
       PYTHONPATH: /opt/airflow
@@ -119,7 +123,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-sismowatch_admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sismowatch_secure_pass_2026}
       DB_SPARK_PASS: ${DB_SPARK_PASS:-spark_etl_secure_pass_2026}
-      MINIO_ENDPOINT: minio:9090
+      MINIO_ENDPOINT: minio:9000
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-miniopassword2026}
       PYTHONPATH: /opt/airflow
@@ -153,7 +157,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sismowatch_secure_pass_2026}
       DB_API_READER_PASS: ${DB_API_READER_PASS:-api_reader_secure_pass_2026}
       DB_SPARK_PASS: ${DB_SPARK_PASS:-spark_etl_secure_pass_2026}
-      MINIO_ENDPOINT: minio:9090
+      MINIO_ENDPOINT: minio:9000
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-miniopassword2026}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-sismowatch_enterprise_jwt_ultra_secret_key_2026_xyz}
