@@ -155,5 +155,21 @@ class AnomalyDetector:
             cur.close()
             conn.close()
             logger.info(f"Persisted {len(anomalies)} anomalies to gold.ai_anomalies.")
+
+            # Architectural constraint: Persist Gold anomaly data in MinIO Lakehouse
+            from airflow.include.minio_client import lakehouse_client
+            import datetime
+            now_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
+            lakehouse_client.put_object(
+                config.minio_bucket_gold,
+                f"anomalies/anomalies_{now_str}.json",
+                json.dumps(anomalies, indent=2, default=str)
+            )
+            lakehouse_client.put_object(
+                config.minio_bucket_gold,
+                "anomalies/latest_anomalies.json",
+                json.dumps(anomalies, indent=2, default=str)
+            )
+            logger.info("Persisted detected anomalies to MinIO Gold.")
         except Exception as e:
             logger.warning(f"Could not persist anomalies to database: {e}")

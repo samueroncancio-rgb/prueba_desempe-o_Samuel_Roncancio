@@ -234,6 +234,20 @@ class ExecutiveReporter:
             cur.close()
             conn.close()
             logger.info(f"Persisted executive daily report for {report_data['report_date']} to gold.ai_daily_reports.")
+
+            # Architectural constraint: Persist Gold report data in MinIO Lakehouse
+            from airflow.include.minio_client import lakehouse_client
+            lakehouse_client.put_object(
+                config.minio_bucket_gold,
+                f"executive_reports/{report_data['report_date']}_report.json",
+                json.dumps(report_data, indent=2, default=str)
+            )
+            lakehouse_client.put_object(
+                config.minio_bucket_gold,
+                "executive_reports/latest_report.json",
+                json.dumps(report_data, indent=2, default=str)
+            )
+            logger.info("Persisted executive daily report to MinIO Gold.")
         except Exception as e:
             logger.error(f"Failed to persist report to gold: {e}")
 

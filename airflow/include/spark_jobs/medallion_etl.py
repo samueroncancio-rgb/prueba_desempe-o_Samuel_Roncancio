@@ -52,13 +52,59 @@ class MedallionETLJob:
         lakehouse_client.put_object(config.minio_bucket_silver, silver_object_name, silver_payload)
         logger.info(f"Successfully persisted {len(valid_records)} records to MinIO Silver: {silver_object_name}")
 
-        # 4. Load into PostgreSQL GOLD Serving Layer (Idempotent UPSERT)
+        # 4. Save to MinIO GOLD Layer (Curated Datasets, Quality Audits & Aggregations)
+        # Architectural constraint: Gold layer data files reside in MinIO (sismowatch-gold).
+        now = datetime.datetime.now(datetime.timezone.utc)
+        gold_object_name = f"curated_events/year={now.year}/month={now.month:02d}/gold_events_{timestamp_str}.json"
+        
+        mags = [float(r["mag"]) for r in valid_records if r.get("mag") is not None]
+        gold_summary = {
+            "batch_timestamp": now.isoformat(),
+            "source_bronze": bronze_object_name,
+            "source_silver": silver_object_name,
+            "total_curated_events": len(valid_records),
+            "max_magnitude": max(mags) if mags else 0.0,
+            "min_magnitude": min(mags) if mags else 0.0,
+            "avg_magnitude": round(sum(mags) / len(mags), 2) if mags else 0.0,
+            "tsunami_alerts_count": sum(1 for r in valid_records if r.get("tsunami_alert")),
+            "deep_events_count": sum(1 for r in valid_records if float(r.get("depth_km", 0)) > 100),
+            "quality_score": metrics["quality_score"],
+            "events": [
+                {k: (v.isoformat() if isinstance(v, datetime.datetime) else v) for k, v in r.items()}
+                for r in valid_records
+            ]
+        }
+        gold_payload = json.dumps(gold_summary, indent=2)
+        lakehouse_client.put_object(config.minio_bucket_gold, gold_object_name, gold_payload)
+        lakehouse_client.put_object(config.minio_bucket_gold, "curated_events/latest_gold.json", gold_payload)
+
+        # Aggregates and quality runs in Gold
+        lakehouse_client.put_object(
+            config.minio_bucket_gold,
+            f"aggregates/year={now.year}/month={now.month:02d}/daily_aggregates_{now.strftime('%Y%m%d')}.json",
+            json.dumps({
+                "date": now.strftime("%Y-%m-%d"),
+                "total_events": len(valid_records),
+                "avg_magnitude": gold_summary["avg_magnitude"],
+                "max_magnitude": gold_summary["max_magnitude"],
+                "quality_score": metrics["quality_score"]
+            }, indent=2)
+        )
+        lakehouse_client.put_object(
+            config.minio_bucket_gold,
+            f"quality_runs/quality_run_{timestamp_str}.json",
+            json.dumps(metrics, indent=2)
+        )
+        logger.info(f"Successfully persisted Gold layer datasets to MinIO: {gold_object_name}")
+
+        # 5. Load into PostgreSQL GOLD Serving Layer (Idempotent UPSERT of facts and metadata)
         self._upsert_to_gold(valid_records, quarantine_records, metrics)
 
         return {
             "status": "SUCCESS",
             "bronze_source": bronze_object_name,
             "silver_destination": silver_object_name,
+            "gold_destination": gold_object_name,
             "total_processed": metrics["total_records"],
             "gold_upserted": len(valid_records),
             "auto_healed": metrics["auto_healed_records"],
