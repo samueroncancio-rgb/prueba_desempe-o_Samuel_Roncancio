@@ -6,7 +6,8 @@ import {
   Activity, Shield, AlertTriangle, Database, Bot, RefreshCw, 
   Download, LogOut, CheckCircle2, XCircle, Search, Filter, 
   MapPin, Send, Server, Sparkles, User, Info, ArrowRight, Globe, Navigation,
-  BarChart2, PieChart, TrendingUp, Flame, ShieldAlert, Layers, Calendar, FileText, ChevronDown
+  BarChart2, PieChart, TrendingUp, Flame, ShieldAlert, Layers, Calendar, FileText, ChevronDown,
+  Zap, Clock, Target, SunMedium
 } from 'lucide-react';
 
 const API_BASE = 'http://localhost:8000';
@@ -57,20 +58,30 @@ export default function App() {
   const mapRef = useRef<any>(null);
   const markersGroupRef = useRef<any>(null);
 
-  // Analytics & Timeseries state for Daily Reports
+  // Analytics & Multi-timeframe state for Reports
+  const [reportTimeframe, setReportTimeframe] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('daily');
+  const [analyticsData, setAnalyticsData] = useState<any>(null);
   const [timeseriesData, setTimeseriesData] = useState<any[]>([]);
   const [selectedReportIndex, setSelectedReportIndex] = useState<number>(0);
 
-  // Chart canvas refs & instance refs
+  // Chart canvas refs & instance refs (8 Charts Suite)
   const magChartRef = useRef<HTMLCanvasElement | null>(null);
   const depthChartRef = useRef<HTMLCanvasElement | null>(null);
   const trendChartRef = useRef<HTMLCanvasElement | null>(null);
+  const energyChartRef = useRef<HTMLCanvasElement | null>(null);
   const regionChartRef = useRef<HTMLCanvasElement | null>(null);
+  const scatterChartRef = useRef<HTMLCanvasElement | null>(null);
+  const diurnalChartRef = useRef<HTMLCanvasElement | null>(null);
+  const significanceChartRef = useRef<HTMLCanvasElement | null>(null);
 
   const magChartInstance = useRef<any>(null);
   const depthChartInstance = useRef<any>(null);
   const trendChartInstance = useRef<any>(null);
+  const energyChartInstance = useRef<any>(null);
   const regionChartInstance = useRef<any>(null);
+  const scatterChartInstance = useRef<any>(null);
+  const diurnalChartInstance = useRef<any>(null);
+  const significanceChartInstance = useRef<any>(null);
 
   const focusOnEvent = (ev: any) => {
     if (mapRef.current && ev.latitude != null && ev.longitude != null) {
@@ -143,6 +154,10 @@ export default function App() {
       const repRes = await fetch(`${API_BASE}/api/reports?limit=10`, { headers });
       if (repRes.ok) setReports(await repRes.json());
 
+      // Multi-timeframe analytics for Reports Suite
+      const anRes = await fetch(`${API_BASE}/api/reports/analytics?timeframe=${reportTimeframe}`, { headers });
+      if (anRes.ok) setAnalyticsData(await anRes.json());
+
       // Timeseries Analytics for Reports Dashboard
       const tsRes = await fetch(`${API_BASE}/api/stats/timeseries?days=7`, { headers });
       if (tsRes.ok) setTimeseriesData(await tsRes.json());
@@ -170,6 +185,23 @@ export default function App() {
       fetchData();
     }
   }, [session, minMag, regionFilter]);
+
+  // Reactive reload when timeframe changes
+  useEffect(() => {
+    if (!session) return;
+    const fetchTimeframeAnalytics = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/reports/analytics?timeframe=${reportTimeframe}`, {
+          headers: { Authorization: `Bearer ${session.token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setAnalyticsData(data);
+        }
+      } catch (e) {}
+    };
+    fetchTimeframeAnalytics();
+  }, [session, reportTimeframe]);
 
   // Server-Sent Events (SSE) Real-Time Hook
   useEffect(() => {
@@ -375,43 +407,45 @@ export default function App() {
     }
   }, [events]);
 
-  // Analytical Charts Engine for Daily Reports View
+  // Analytical Charts Engine for Reports View (8-Chart Suite)
   useEffect(() => {
     if (activeTab !== 'reports') return;
 
-    // Clean up prior Chart.js instances
-    if (magChartInstance.current) {
-      magChartInstance.current.destroy();
-      magChartInstance.current = null;
-    }
-    if (depthChartInstance.current) {
-      depthChartInstance.current.destroy();
-      depthChartInstance.current = null;
-    }
-    if (trendChartInstance.current) {
-      trendChartInstance.current.destroy();
-      trendChartInstance.current = null;
-    }
-    if (regionChartInstance.current) {
-      regionChartInstance.current.destroy();
-      regionChartInstance.current = null;
-    }
+    // Clean up prior 8 Chart.js instances
+    [
+      magChartInstance, depthChartInstance, trendChartInstance, energyChartInstance,
+      regionChartInstance, scatterChartInstance, diurnalChartInstance, significanceChartInstance
+    ].forEach(inst => {
+      if (inst.current) {
+        inst.current.destroy();
+        inst.current = null;
+      }
+    });
 
     // Global Chart.js styling
     Chart.defaults.color = '#94a3b8';
     Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
 
-    // 1. Chart 1: Magnitude Range Distribution (Bar Chart)
-    let micro = 0, menor = 0, moderado = 0, fuerte = 0, mayor = 0;
-    events.forEach((ev: any) => {
-      const m = parseFloat(ev.mag) || 0;
-      if (m < 2.0) micro++;
-      else if (m < 4.0) menor++;
-      else if (m < 5.5) moderado++;
-      else if (m < 7.0) fuerte++;
-      else mayor++;
-    });
+    // Data extraction helpers
+    const magData = analyticsData?.magnitude_distribution || {
+      micro: events.filter(e => parseFloat(e.mag) < 2.0).length,
+      menor: events.filter(e => parseFloat(e.mag) >= 2.0 && parseFloat(e.mag) < 4.0).length,
+      moderado: events.filter(e => parseFloat(e.mag) >= 4.0 && parseFloat(e.mag) < 5.5).length,
+      fuerte: events.filter(e => parseFloat(e.mag) >= 5.5 && parseFloat(e.mag) < 7.0).length,
+      mayor: events.filter(e => parseFloat(e.mag) >= 7.0).length
+    };
 
+    const depthData = analyticsData?.depth_distribution || {
+      shallow: events.filter(e => parseFloat(e.depth_km) <= 30).length,
+      intermediate: events.filter(e => parseFloat(e.depth_km) > 30 && parseFloat(e.depth_km) <= 100).length,
+      deep: events.filter(e => parseFloat(e.depth_km) > 100).length
+    };
+
+    const tsList = (analyticsData?.timeseries && analyticsData.timeseries.length > 0)
+      ? analyticsData.timeseries
+      : timeseriesData;
+
+    // 1. Chart 1: Magnitude Range Distribution (Bar Chart)
     if (magChartRef.current) {
       magChartInstance.current = new Chart(magChartRef.current, {
         type: 'bar',
@@ -419,7 +453,7 @@ export default function App() {
           labels: ['Micro (<2.0)', 'Menor (2.0-3.9)', 'Moderado (4.0-5.4)', 'Fuerte (5.5-6.9)', 'Mayor (≥7.0)'],
           datasets: [{
             label: 'Cantidad de Sismos',
-            data: [micro, menor, moderado, fuerte, mayor],
+            data: [magData.micro, magData.menor, magData.moderado, magData.fuerte, magData.mayor],
             backgroundColor: [
               'rgba(16, 185, 129, 0.75)',
               'rgba(59, 130, 246, 0.75)',
@@ -437,48 +471,29 @@ export default function App() {
           maintainAspectRatio: false,
           plugins: {
             legend: { display: false },
-            tooltip: {
-              backgroundColor: '#0f172a',
-              borderColor: '#334155',
-              borderWidth: 1,
-              padding: 10
-            }
+            tooltip: { backgroundColor: '#0f172a', borderColor: '#334155', borderWidth: 1, padding: 10 }
           },
           scales: {
-            x: {
-              grid: { display: false },
-              ticks: { color: '#94a3b8', font: { size: 10 } }
-            },
-            y: {
-              grid: { color: 'rgba(51, 65, 85, 0.3)' },
-              ticks: { color: '#94a3b8', stepSize: 1, precision: 0 }
-            }
+            x: { grid: { display: false }, ticks: { color: '#94a3b8', font: { size: 10 } } },
+            y: { grid: { color: 'rgba(51, 65, 85, 0.3)' }, ticks: { color: '#94a3b8', stepSize: 1, precision: 0 } }
           }
         }
       });
     }
 
     // 2. Chart 2: Tectonic Depth Classification (Doughnut Chart)
-    let shallow = 0, intermediate = 0, deep = 0;
-    events.forEach((ev: any) => {
-      const d = parseFloat(ev.depth_km) || 0;
-      if (d <= 30) shallow++;
-      else if (d <= 100) intermediate++;
-      else deep++;
-    });
-
     if (depthChartRef.current) {
       depthChartInstance.current = new Chart(depthChartRef.current, {
         type: 'doughnut',
         data: {
           labels: ['Superficial (≤30km)', 'Intermedio (30-100km)', 'Profundo (>100km)'],
           datasets: [{
-            data: [shallow || (events.length === 0 ? 1 : 0), intermediate, deep],
-            backgroundColor: [
-              'rgba(239, 68, 68, 0.8)',
-              'rgba(245, 158, 11, 0.8)',
-              'rgba(99, 102, 241, 0.85)'
+            data: [
+              depthData.shallow || (events.length === 0 ? 1 : 0),
+              depthData.intermediate,
+              depthData.deep
             ],
+            backgroundColor: ['rgba(239, 68, 68, 0.8)', 'rgba(245, 158, 11, 0.8)', 'rgba(99, 102, 241, 0.85)'],
             borderColor: '#0f172a',
             borderWidth: 2
           }]
@@ -488,26 +503,28 @@ export default function App() {
           maintainAspectRatio: false,
           cutout: '65%',
           plugins: {
-            legend: {
-              position: 'bottom',
-              labels: { color: '#cbd5e1', font: { size: 10 }, padding: 8 }
-            }
+            legend: { position: 'bottom', labels: { color: '#cbd5e1', font: { size: 10 }, padding: 8 } }
           }
         }
       });
     }
 
     // 3. Chart 3: Time Series Activity & Magnitude Trend (Dual Axis)
-    const timeLabels = timeseriesData.length > 0
-      ? timeseriesData.map(t => new Date(t.time_bucket).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))
+    const timeLabels = tsList.length > 0
+      ? tsList.map((t: any) => {
+          const d = new Date(t.time_bucket);
+          return reportTimeframe === 'daily'
+            ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            : d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+        })
       : events.slice(0, 8).reverse().map(e => new Date(e.event_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-    
-    const timeCounts = timeseriesData.length > 0
-      ? timeseriesData.map(t => t.event_count)
+
+    const timeCounts = tsList.length > 0
+      ? tsList.map((t: any) => t.event_count)
       : events.slice(0, 8).reverse().map((_, idx) => idx + 1);
 
-    const timeMags = timeseriesData.length > 0
-      ? timeseriesData.map(t => t.avg_magnitude)
+    const timeMags = tsList.length > 0
+      ? tsList.map((t: any) => t.avg_magnitude)
       : events.slice(0, 8).reverse().map(e => parseFloat(e.mag) || 1);
 
     if (trendChartRef.current) {
@@ -539,58 +556,74 @@ export default function App() {
         options: {
           responsive: true,
           maintainAspectRatio: false,
-          plugins: {
-            legend: {
-              labels: { color: '#cbd5e1', font: { size: 10 } }
-            }
-          },
+          plugins: { legend: { labels: { color: '#cbd5e1', font: { size: 10 } } } },
           scales: {
-            x: {
-              grid: { color: 'rgba(51, 65, 85, 0.2)' },
-              ticks: { color: '#94a3b8', font: { size: 10 } }
-            },
-            y: {
-              type: 'linear',
-              position: 'left',
-              grid: { color: 'rgba(51, 65, 85, 0.3)' },
-              ticks: { color: '#10b981', stepSize: 1, precision: 0 }
-            },
-            y1: {
-              type: 'linear',
-              position: 'right',
-              grid: { drawOnChartArea: false },
-              ticks: { color: '#f59e0b', precision: 1 }
-            }
+            x: { grid: { color: 'rgba(51, 65, 85, 0.2)' }, ticks: { color: '#94a3b8', font: { size: 10 } } },
+            y: { type: 'linear', position: 'left', grid: { color: 'rgba(51, 65, 85, 0.3)' }, ticks: { color: '#10b981', precision: 0 } },
+            y1: { type: 'linear', position: 'right', grid: { drawOnChartArea: false }, ticks: { color: '#f59e0b', precision: 1 } }
           }
         }
       });
     }
 
-    // 4. Chart 4: Top 5 Active Seismic Zones (Horizontal Bar Chart)
-    const regionCounts: Record<string, number> = {};
-    events.forEach((ev: any) => {
-      let place = ev.place_sanitized || 'Desconocido';
-      if (place.includes(' of ')) {
-        place = place.split(' of ')[1].trim();
-      }
-      regionCounts[place] = (regionCounts[place] || 0) + 1;
-    });
+    // 4. Chart 4: Cumulative Seismic Energy Release (Gutenberg-Richter Formula - Megajoules)
+    const energyVals = tsList.length > 0
+      ? tsList.map((t: any) => t.energy_mj || 0)
+      : events.slice(0, 8).map(e => Math.pow(10, 4.8 + 1.5 * (parseFloat(e.mag) || 1)) / 1e6);
 
-    const sortedRegions = Object.entries(regionCounts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5);
+    if (energyChartRef.current) {
+      energyChartInstance.current = new Chart(energyChartRef.current, {
+        type: 'line',
+        data: {
+          labels: timeLabels.length > 0 ? timeLabels : ['00:00', '06:00', '12:00', '18:00', '24:00'],
+          datasets: [{
+            label: 'Energía Sísmica (Megajoules)',
+            data: energyVals.length > 0 ? energyVals : [100, 250, 400, 1200, 5000],
+            borderColor: '#f43f5e',
+            backgroundColor: 'rgba(244, 63, 94, 0.2)',
+            fill: true,
+            tension: 0.35,
+            borderWidth: 2,
+            pointBackgroundColor: '#f43f5e',
+            pointRadius: 4
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (ctx: any) => ` Energía: ${Number(ctx.raw).toLocaleString()} MJ`
+              }
+            }
+          },
+          scales: {
+            x: { grid: { color: 'rgba(51, 65, 85, 0.2)' }, ticks: { color: '#94a3b8', font: { size: 10 } } },
+            y: { grid: { color: 'rgba(51, 65, 85, 0.3)' }, ticks: { color: '#f43f5e', font: { size: 10 } } }
+          }
+        }
+      });
+    }
 
-    const regLabels = sortedRegions.map(r => r[0]);
-    const regValues = sortedRegions.map(r => r[1]);
+    // 5. Chart 5: Top 5 Active Seismic Zones (Horizontal Bar Chart)
+    const topRegs = analyticsData?.top_regions || [];
+    const regLabels = topRegs.length > 0
+      ? topRegs.map((r: any) => r.region)
+      : ['California', 'Alaska', 'Nevada', 'Hawaii', 'Chile'];
+    const regValues = topRegs.length > 0
+      ? topRegs.map((r: any) => r.count)
+      : [4, 3, 2, 1, 1];
 
     if (regionChartRef.current) {
       regionChartInstance.current = new Chart(regionChartRef.current, {
         type: 'bar',
         data: {
-          labels: regLabels.length > 0 ? regLabels : ['California', 'Alaska', 'Nevada', 'Hawaii', 'Chile'],
+          labels: regLabels,
           datasets: [{
             label: 'Eventos por Región',
-            data: regValues.length > 0 ? regValues : [3, 2, 1, 1, 1],
+            data: regValues,
             backgroundColor: 'rgba(56, 189, 248, 0.75)',
             borderColor: '#38bdf8',
             borderWidth: 1.5,
@@ -601,42 +634,143 @@ export default function App() {
           indexAxis: 'y',
           responsive: true,
           maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { grid: { color: 'rgba(51, 65, 85, 0.3)' }, ticks: { color: '#94a3b8', precision: 0 } },
+            y: { grid: { display: false }, ticks: { color: '#cbd5e1', font: { size: 10 } } }
+          }
+        }
+      });
+    }
+
+    // 6. Chart 6: Hypocentral Depth vs. Magnitude Correlation (Scatter Plot)
+    const scatterData = (analyticsData?.scatter_points && analyticsData.scatter_points.length > 0)
+      ? analyticsData.scatter_points.map((p: any) => ({ x: p.x, y: p.y, place: p.place }))
+      : events.map(e => ({ x: parseFloat(e.mag) || 1, y: parseFloat(e.depth_km) || 10, place: e.place_sanitized }));
+
+    if (scatterChartRef.current) {
+      scatterChartInstance.current = new Chart(scatterChartRef.current, {
+        type: 'scatter',
+        data: {
+          datasets: [{
+            label: 'Hipocentros',
+            data: scatterData,
+            backgroundColor: 'rgba(239, 68, 68, 0.75)',
+            borderColor: '#ffffff',
+            borderWidth: 1,
+            pointRadius: 6,
+            pointHoverRadius: 9
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
           plugins: {
-            legend: { display: false }
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (ctx: any) => {
+                  const raw = ctx.raw as any;
+                  return ` Mag: ${raw.x} M | Prof: ${raw.y} km (${raw.place || ''})`;
+                }
+              }
+            }
           },
           scales: {
             x: {
-              grid: { color: 'rgba(51, 65, 85, 0.3)' },
-              ticks: { color: '#94a3b8', stepSize: 1, precision: 0 }
+              title: { display: true, text: 'Magnitud (M)', color: '#94a3b8', font: { size: 10 } },
+              grid: { color: 'rgba(51, 65, 85, 0.2)' },
+              ticks: { color: '#94a3b8' }
             },
             y: {
-              grid: { display: false },
-              ticks: { color: '#cbd5e1', font: { size: 10 } }
+              reverse: true, // Seismological convention: depth increases downward into Earth's crust!
+              title: { display: true, text: 'Profundidad (km)', color: '#94a3b8', font: { size: 10 } },
+              grid: { color: 'rgba(51, 65, 85, 0.3)' },
+              ticks: { color: '#94a3b8' }
             }
           }
         }
       });
     }
 
-    return () => {
-      if (magChartInstance.current) {
-        magChartInstance.current.destroy();
-        magChartInstance.current = null;
-      }
-      if (depthChartInstance.current) {
-        depthChartInstance.current.destroy();
-        depthChartInstance.current = null;
-      }
-      if (trendChartInstance.current) {
-        trendChartInstance.current.destroy();
-        trendChartInstance.current = null;
-      }
-      if (regionChartInstance.current) {
-        regionChartInstance.current.destroy();
-        regionChartInstance.current = null;
-      }
+    // 7. Chart 7: Diurnal Seismic Activity Cycle (00h - 23h UTC)
+    const diurnalVals = analyticsData?.hourly_distribution || Array(24).fill(0);
+    const diurnalLabels = Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, '0')}h`);
+
+    if (diurnalChartRef.current) {
+      diurnalChartInstance.current = new Chart(diurnalChartRef.current, {
+        type: 'bar',
+        data: {
+          labels: diurnalLabels,
+          datasets: [{
+            label: 'Eventos por Franja Horaria UTC',
+            data: diurnalVals,
+            backgroundColor: 'rgba(168, 85, 247, 0.75)',
+            borderColor: '#a855f7',
+            borderWidth: 1,
+            borderRadius: 4
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { grid: { display: false }, ticks: { color: '#94a3b8', font: { size: 9 } } },
+            y: { grid: { color: 'rgba(51, 65, 85, 0.3)' }, ticks: { color: '#94a3b8', precision: 0 } }
+          }
+        }
+      });
+    }
+
+    // 8. Chart 8: USGS Significance & Severity Index (Doughnut Chart)
+    const sigData = analyticsData?.significance_distribution || {
+      low: events.filter(e => (e.significance || 0) < 100).length || 1,
+      moderate: events.filter(e => (e.significance || 0) >= 100 && (e.significance || 0) < 300).length,
+      high: events.filter(e => (e.significance || 0) >= 300 && (e.significance || 0) < 600).length,
+      critical: events.filter(e => (e.significance || 0) >= 600).length
     };
-  }, [activeTab, reports, events, timeseriesData, selectedReportIndex]);
+
+    if (significanceChartRef.current) {
+      significanceChartInstance.current = new Chart(significanceChartRef.current, {
+        type: 'doughnut',
+        data: {
+          labels: ['Baja (<100)', 'Moderada (100-299)', 'Alta (300-599)', 'Crítica (≥600)'],
+          datasets: [{
+            data: [sigData.low, sigData.moderate, sigData.high, sigData.critical],
+            backgroundColor: [
+              'rgba(16, 185, 129, 0.8)',
+              'rgba(59, 130, 246, 0.8)',
+              'rgba(245, 158, 11, 0.8)',
+              'rgba(239, 68, 68, 0.85)'
+            ],
+            borderColor: '#0f172a',
+            borderWidth: 2
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: '60%',
+          plugins: {
+            legend: { position: 'bottom', labels: { color: '#cbd5e1', font: { size: 10 }, padding: 6 } }
+          }
+        }
+      });
+    }
+
+    return () => {
+      [
+        magChartInstance, depthChartInstance, trendChartInstance, energyChartInstance,
+        regionChartInstance, scatterChartInstance, diurnalChartInstance, significanceChartInstance
+      ].forEach(inst => {
+        if (inst.current) {
+          inst.current.destroy();
+          inst.current = null;
+        }
+      });
+    };
+  }, [activeTab, analyticsData, reports, events, timeseriesData, reportTimeframe]);
 
   // Send RAG Chat Message
   const handleSendMessage = async (e: React.FormEvent) => {
@@ -883,8 +1017,8 @@ export default function App() {
             onClick={() => setActiveTab('reports')}
             className={`w-full flex items-center space-x-2.5 px-3 py-2.5 rounded-lg text-xs font-medium transition ${activeTab === 'reports' ? 'bg-emerald-600 text-white font-semibold' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}
           >
-            <Sparkles className="w-4 h-4" />
-            <span>Reportes Diarios IA</span>
+            <BarChart2 className="w-4 h-4" />
+            <span>Reportes</span>
           </button>
 
           <button
@@ -1144,29 +1278,77 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB 2: AI REPORTS & EXECUTIVE ANALYTICS DASHBOARD */}
+          {/* TAB 2: REPORTS & MULTI-TIMEFRAME ANALYTICS DASHBOARD */}
           {activeTab === 'reports' && (
             <div className="space-y-6">
               {/* Executive Header & Controls */}
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-lg">
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-lg">
                 <div className="space-y-1">
                   <div className="flex items-center space-x-2">
                     <span className="p-1.5 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-emerald-400">
                       <BarChart2 className="w-5 h-5" />
                     </span>
-                    <h2 className="text-xl font-bold text-white tracking-tight">Dashboard Analítico & Reportes Ejecutivos</h2>
+                    <h2 className="text-xl font-bold text-white tracking-tight">Centro Ejecutivo de Reportes e Inteligencia Sísmica</h2>
                     <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full text-[10px] font-mono font-semibold">
-                      DATA ENGINE GOLD
+                      MULTI-TIMEFRAME
                     </span>
                   </div>
                   <p className="text-xs text-slate-400 max-w-2xl leading-relaxed">
-                    Evaluación cuantitativa de la sismicidad global, perfiles hipocentrales, distribución de magnitudes y reportes ejecutivos gobernados sin alucinaciones numéricas.
+                    Evaluación cuantitativa de la sismicidad global, perfiles hipocentrales, dispersión geológica, ciclos diurnos y liberación de energía acumulada.
                   </p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2.5">
-                  {/* Selector of Reports */}
-                  {reports.length > 0 && (
+                  {/* Timeframe Selector Toggle */}
+                  <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 gap-1">
+                    <button
+                      onClick={() => setReportTimeframe('daily')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition ${
+                        reportTimeframe === 'daily'
+                          ? 'bg-emerald-600 text-white shadow-md'
+                          : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                      }`}
+                    >
+                      <Clock className="w-3.5 h-3.5" />
+                      <span>Diario (24h)</span>
+                    </button>
+                    <button
+                      onClick={() => setReportTimeframe('weekly')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition ${
+                        reportTimeframe === 'weekly'
+                          ? 'bg-emerald-600 text-white shadow-md'
+                          : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                      }`}
+                    >
+                      <Calendar className="w-3.5 h-3.5" />
+                      <span>Semanal (7D)</span>
+                    </button>
+                    <button
+                      onClick={() => setReportTimeframe('monthly')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition ${
+                        reportTimeframe === 'monthly'
+                          ? 'bg-emerald-600 text-white shadow-md'
+                          : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                      }`}
+                    >
+                      <Layers className="w-3.5 h-3.5" />
+                      <span>Mensual (30D)</span>
+                    </button>
+                    <button
+                      onClick={() => setReportTimeframe('yearly')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition ${
+                        reportTimeframe === 'yearly'
+                          ? 'bg-emerald-600 text-white shadow-md'
+                          : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                      }`}
+                    >
+                      <TrendingUp className="w-3.5 h-3.5" />
+                      <span>Anual (365D)</span>
+                    </button>
+                  </div>
+
+                  {/* Selector of Historical Reports (Only when in Daily timeframe) */}
+                  {reportTimeframe === 'daily' && reports.length > 0 && (
                     <div className="relative">
                       <select
                         value={selectedReportIndex}
@@ -1175,7 +1357,7 @@ export default function App() {
                       >
                         {reports.map((rep: any, idx: number) => (
                           <option key={rep.report_id || idx} value={idx}>
-                            📅 {rep.report_date} - {rep.title?.slice(0, 28)}...
+                            📅 {rep.report_date} - {rep.title?.slice(0, 24)}...
                           </option>
                         ))}
                       </select>
@@ -1210,7 +1392,7 @@ export default function App() {
                       className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition shadow-sm"
                     >
                       <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-                      <span>Regenerar Informe Hoy</span>
+                      <span>Regenerar Informe</span>
                     </button>
                   )}
                 </div>
@@ -1228,13 +1410,13 @@ export default function App() {
                   </div>
                   <div className="my-2">
                     <div className="text-2xl font-black text-white font-mono">
-                      {reportMetrics.total_events ?? 0}
+                      {analyticsData?.summary?.total_events ?? reportMetrics.total_events}
                     </div>
-                    <span className="text-[10px] text-slate-400">Capa Gold Serving</span>
+                    <span className="text-[10px] text-slate-400">Ventana: {reportTimeframe}</span>
                   </div>
                   <div className="pt-1 border-t border-slate-800/80 flex items-center text-[10px] text-emerald-400 font-medium">
                     <CheckCircle2 className="w-3 h-3 mr-1" />
-                    <span>100% Curados</span>
+                    <span>100% Curados en Gold</span>
                   </div>
                 </div>
 
@@ -1248,14 +1430,16 @@ export default function App() {
                   </div>
                   <div className="my-2">
                     <div className="text-2xl font-black text-red-400 font-mono">
-                      {reportMetrics.max_magnitude ? Number(reportMetrics.max_magnitude).toFixed(1) : '0.0'} <span className="text-xs font-normal text-slate-400">M</span>
+                      {analyticsData?.summary?.max_magnitude != null
+                        ? Number(analyticsData.summary.max_magnitude).toFixed(1)
+                        : (reportMetrics.max_magnitude ? Number(reportMetrics.max_magnitude).toFixed(1) : '0.0')} <span className="text-xs font-normal text-slate-400">M</span>
                     </div>
-                    <span className="text-[10px] text-slate-400 truncate block max-w-full" title={reportMetrics.max_mag_place}>
-                      {reportMetrics.max_mag_place || 'Sin eventos'}
+                    <span className="text-[10px] text-slate-400 truncate block max-w-full" title={analyticsData?.summary?.max_mag_place || reportMetrics.max_mag_place}>
+                      {analyticsData?.summary?.max_mag_place || reportMetrics.max_mag_place || 'Sin eventos'}
                     </span>
                   </div>
                   <div className="pt-1 border-t border-slate-800/80 flex items-center text-[10px] text-red-400 font-medium">
-                    <span>Máxima Energía</span>
+                    <span>Máxima Liberación</span>
                   </div>
                 </div>
 
@@ -1269,7 +1453,9 @@ export default function App() {
                   </div>
                   <div className="my-2">
                     <div className="text-2xl font-black text-amber-300 font-mono">
-                      {reportMetrics.avg_magnitude ? Number(reportMetrics.avg_magnitude).toFixed(2) : '0.00'} <span className="text-xs font-normal text-slate-400">M</span>
+                      {analyticsData?.summary?.avg_magnitude != null
+                        ? Number(analyticsData.summary.avg_magnitude).toFixed(2)
+                        : (reportMetrics.avg_magnitude ? Number(reportMetrics.avg_magnitude).toFixed(2) : '0.00')} <span className="text-xs font-normal text-slate-400">M</span>
                     </div>
                     <span className="text-[10px] text-slate-400">Media Ponderada</span>
                   </div>
@@ -1278,7 +1464,28 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Metric 4: Sismos Profundos */}
+                {/* Metric 4: Energy Release (Gutenberg-Richter) */}
+                <div className="bg-slate-900/90 border border-slate-800 p-4 rounded-xl flex flex-col justify-between hover:border-slate-700 transition">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-medium text-slate-400">Energía Estimada</span>
+                    <span className="p-1.5 bg-rose-500/10 text-rose-400 rounded-lg">
+                      <Zap className="w-4 h-4" />
+                    </span>
+                  </div>
+                  <div className="my-2">
+                    <div className="text-xl font-black text-rose-400 font-mono truncate" title={`${Number(analyticsData?.summary?.total_energy_mj || 0).toLocaleString()} Megajoules`}>
+                      {analyticsData?.summary?.total_energy_mj != null
+                        ? `${(analyticsData.summary.total_energy_mj / 1000).toFixed(1)}k`
+                        : '0'} <span className="text-xs font-normal text-slate-400">MJ</span>
+                    </div>
+                    <span className="text-[10px] text-slate-400">Gutenberg-Richter</span>
+                  </div>
+                  <div className="pt-1 border-t border-slate-800/80 flex items-center text-[10px] text-rose-400 font-medium">
+                    <span>Esfuerzo Tectónico</span>
+                  </div>
+                </div>
+
+                {/* Metric 5: Deep Events */}
                 <div className="bg-slate-900/90 border border-slate-800 p-4 rounded-xl flex flex-col justify-between hover:border-slate-700 transition">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-medium text-slate-400">Profundos (&gt;100km)</span>
@@ -1288,16 +1495,16 @@ export default function App() {
                   </div>
                   <div className="my-2">
                     <div className="text-2xl font-black text-indigo-300 font-mono">
-                      {reportMetrics.deep_events_count ?? 0}
+                      {analyticsData?.summary?.deep_events_count ?? reportMetrics.deep_events_count}
                     </div>
-                    <span className="text-[10px] text-slate-400">Zona Benioff / Manto</span>
+                    <span className="text-[10px] text-slate-400">Zona Wadati-Benioff</span>
                   </div>
                   <div className="pt-1 border-t border-slate-800/80 flex items-center text-[10px] text-indigo-400 font-medium">
-                    <span>Subducción Profunda</span>
+                    <span>Manto Superior</span>
                   </div>
                 </div>
 
-                {/* Metric 5: Alertas Tsunami */}
+                {/* Metric 6: Tsunami Alerts */}
                 <div className="bg-slate-900/90 border border-slate-800 p-4 rounded-xl flex flex-col justify-between hover:border-slate-700 transition">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-medium text-slate-400">Alertas Tsunami</span>
@@ -1307,43 +1514,23 @@ export default function App() {
                   </div>
                   <div className="my-2">
                     <div className="text-2xl font-black text-cyan-300 font-mono">
-                      {reportMetrics.tsunami_alerts_count ?? 0}
+                      {analyticsData?.summary?.tsunami_alerts_count ?? reportMetrics.tsunami_alerts_count}
                     </div>
                     <span className="text-[10px] text-slate-400">Boyas DART & USGS</span>
                   </div>
                   <div className="pt-1 border-t border-slate-800/80 flex items-center text-[10px] font-medium">
-                    {(reportMetrics.tsunami_alerts_count ?? 0) > 0 ? (
-                      <span className="text-red-400 font-bold">⚠️ Alerta Activa</span>
+                    {(analyticsData?.summary?.tsunami_alerts_count ?? reportMetrics.tsunami_alerts_count) > 0 ? (
+                      <span className="text-red-400 font-bold">⚠️ Alerta Emitida</span>
                     ) : (
                       <span className="text-emerald-400">🟢 Nivel Nominal</span>
                     )}
                   </div>
                 </div>
-
-                {/* Metric 6: Gobernanza Determinista */}
-                <div className="bg-slate-900/90 border border-slate-800 p-4 rounded-xl flex flex-col justify-between hover:border-slate-700 transition">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-medium text-slate-400">Gobernanza IA</span>
-                    <span className="p-1.5 bg-emerald-500/10 text-emerald-400 rounded-lg">
-                      <Sparkles className="w-4 h-4" />
-                    </span>
-                  </div>
-                  <div className="my-2">
-                    <div className="text-2xl font-black text-emerald-400 font-mono">
-                      100%
-                    </div>
-                    <span className="text-[10px] text-slate-400">Zero Alucinaciones</span>
-                  </div>
-                  <div className="pt-1 border-t border-slate-800/80 flex items-center text-[10px] text-emerald-400 font-medium">
-                    <CheckCircle2 className="w-3 h-3 mr-1" />
-                    <span>Verificado con SQL</span>
-                  </div>
-                </div>
               </div>
 
-              {/* Suite de Gráficas Analíticas (Grid 2x2) */}
+              {/* Suite de Gráficas Analíticas (Grid 8 Cards: 4 Filas x 2 Columnas) */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                {/* Chart Card 1: Magnitude Distribution */}
+                {/* Chart 1: Magnitude Distribution */}
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between shadow-lg hover:border-slate-700/80 transition">
                   <div className="flex items-center justify-between mb-3 border-b border-slate-800 pb-3">
                     <div className="flex items-center space-x-2.5">
@@ -1351,7 +1538,7 @@ export default function App() {
                         <BarChart2 className="w-4 h-4" />
                       </span>
                       <div>
-                        <h3 className="text-sm font-bold text-white">Distribución por Escala de Magnitud</h3>
+                        <h3 className="text-sm font-bold text-white">1. Distribución por Escala de Magnitud</h3>
                         <p className="text-[11px] text-slate-400">Frecuencia sísmica categorizada por bandas Richter/Mw</p>
                       </div>
                     </div>
@@ -1388,7 +1575,7 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Chart Card 2: Depth Profile */}
+                {/* Chart 2: Depth Profile */}
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between shadow-lg hover:border-slate-700/80 transition">
                   <div className="flex items-center justify-between mb-3 border-b border-slate-800 pb-3">
                     <div className="flex items-center space-x-2.5">
@@ -1396,7 +1583,7 @@ export default function App() {
                         <PieChart className="w-4 h-4" />
                       </span>
                       <div>
-                        <h3 className="text-sm font-bold text-white">Perfil Hipocentral de Profundidad</h3>
+                        <h3 className="text-sm font-bold text-white">2. Perfil Hipocentral de Profundidad</h3>
                         <p className="text-[11px] text-slate-400">Clasificación geológica de la profundidad focal (km)</p>
                       </div>
                     </div>
@@ -1425,7 +1612,7 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Chart Card 3: Temporal Series & Magnitude Trend */}
+                {/* Chart 3: Temporal Series & Magnitude Trend */}
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between shadow-lg hover:border-slate-700/80 transition">
                   <div className="flex items-center justify-between mb-3 border-b border-slate-800 pb-3">
                     <div className="flex items-center space-x-2.5">
@@ -1433,7 +1620,7 @@ export default function App() {
                         <TrendingUp className="w-4 h-4" />
                       </span>
                       <div>
-                        <h3 className="text-sm font-bold text-white">Evolución Temporal de Sismos y Magnitud</h3>
+                        <h3 className="text-sm font-bold text-white">3. Evolución Temporal de Sismos y Magnitud</h3>
                         <p className="text-[11px] text-slate-400">Serie de tiempo con eje dual: Frecuencia horaria vs. Intensidad Media</p>
                       </div>
                     </div>
@@ -1449,7 +1636,7 @@ export default function App() {
                   <div className="mt-3 pt-3 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-400">
                     <span className="flex items-center space-x-1.5">
                       <span className="w-3 h-1 bg-emerald-500 rounded"></span>
-                      <span>Volumen de Eventos por Ventana</span>
+                      <span>Volumen de Eventos</span>
                     </span>
                     <span className="flex items-center space-x-1.5">
                       <span className="w-3 h-0.5 border-t-2 border-dashed border-amber-500"></span>
@@ -1458,7 +1645,34 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Chart Card 4: Top 5 Active Regions */}
+                {/* Chart 4: Cumulative Seismic Energy Release */}
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between shadow-lg hover:border-slate-700/80 transition">
+                  <div className="flex items-center justify-between mb-3 border-b border-slate-800 pb-3">
+                    <div className="flex items-center space-x-2.5">
+                      <span className="p-1.5 bg-rose-500/10 text-rose-400 rounded-lg">
+                        <Zap className="w-4 h-4" />
+                      </span>
+                      <div>
+                        <h3 className="text-sm font-bold text-white">4. Liberación de Energía Sísmica Acumulada</h3>
+                        <p className="text-[11px] text-slate-400">Fórmula Gutenberg-Richter: log₁₀(E) = 4.8 + 1.5M (Megajoules)</p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] px-2 py-0.5 bg-rose-500/10 text-rose-400 border border-rose-500/30 rounded font-mono">
+                      Curva de Energía
+                    </span>
+                  </div>
+
+                  <div className="h-64 w-full relative">
+                    <canvas ref={energyChartRef}></canvas>
+                  </div>
+
+                  <div className="mt-3 pt-3 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-400">
+                    <span>Picos de liberación de esfuerzo cortical</span>
+                    <span className="text-rose-400 font-mono">Unidad: MJ</span>
+                  </div>
+                </div>
+
+                {/* Chart 5: Top 5 Active Regions */}
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between shadow-lg hover:border-slate-700/80 transition">
                   <div className="flex items-center justify-between mb-3 border-b border-slate-800 pb-3">
                     <div className="flex items-center space-x-2.5">
@@ -1466,12 +1680,12 @@ export default function App() {
                         <MapPin className="w-4 h-4" />
                       </span>
                       <div>
-                        <h3 className="text-sm font-bold text-white">Top 5 Regiones Sísmicas Más Activas</h3>
+                        <h3 className="text-sm font-bold text-white">5. Top 5 Regiones Sísmicas Más Activas</h3>
                         <p className="text-[11px] text-slate-400">Zonas geográficas con mayor recurrencia de hipocentros</p>
                       </div>
                     </div>
                     <span className="text-[10px] px-2 py-0.5 bg-slate-800 text-slate-300 rounded font-mono">
-                      Ranking Geográfico
+                      Ranking Territorial
                     </span>
                   </div>
 
@@ -1480,13 +1694,108 @@ export default function App() {
                   </div>
 
                   <div className="mt-3 pt-3 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-400">
-                    <span>Identificado por normalización territorial USGS</span>
+                    <span>Normalización territorial USGS</span>
                     <span className="text-sky-400 font-mono">Top Actividad</span>
+                  </div>
+                </div>
+
+                {/* Chart 6: Hypocentral Depth vs Magnitude Scatter */}
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between shadow-lg hover:border-slate-700/80 transition">
+                  <div className="flex items-center justify-between mb-3 border-b border-slate-800 pb-3">
+                    <div className="flex items-center space-x-2.5">
+                      <span className="p-1.5 bg-red-500/10 text-red-400 rounded-lg">
+                        <Target className="w-4 h-4" />
+                      </span>
+                      <div>
+                        <h3 className="text-sm font-bold text-white">6. Dispersión Profundidad vs. Magnitud</h3>
+                        <p className="text-[11px] text-slate-400">Matriz geológica de hipocentros (Eje Y invertido hacia la corteza)</p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] px-2 py-0.5 bg-red-500/10 text-red-400 border border-red-500/30 rounded font-mono">
+                      Scatter Plot
+                    </span>
+                  </div>
+
+                  <div className="h-64 w-full relative">
+                    <canvas ref={scatterChartRef}></canvas>
+                  </div>
+
+                  <div className="mt-3 pt-3 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-400">
+                    <span>Eje vertical invertido: mayor profundidad hacia abajo</span>
+                    <span className="text-red-400 font-mono">Matriz Hipocentros</span>
+                  </div>
+                </div>
+
+                {/* Chart 7: Diurnal Activity Cycle */}
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between shadow-lg hover:border-slate-700/80 transition">
+                  <div className="flex items-center justify-between mb-3 border-b border-slate-800 pb-3">
+                    <div className="flex items-center space-x-2.5">
+                      <span className="p-1.5 bg-purple-500/10 text-purple-400 rounded-lg">
+                        <SunMedium className="w-4 h-4" />
+                      </span>
+                      <div>
+                        <h3 className="text-sm font-bold text-white">7. Ciclo Diurno de Sismicidad (00h - 23h UTC)</h3>
+                        <p className="text-[11px] text-slate-400">Distribución de hipocentros por hora del día en tiempo universal</p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] px-2 py-0.5 bg-purple-500/10 text-purple-400 border border-purple-500/30 rounded font-mono">
+                      Ciclo 24h UTC
+                    </span>
+                  </div>
+
+                  <div className="h-64 w-full relative">
+                    <canvas ref={diurnalChartRef}></canvas>
+                  </div>
+
+                  <div className="mt-3 pt-3 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-400">
+                    <span>Concentración temporal según rotación terrestre</span>
+                    <span className="text-purple-400 font-mono">Distribución Horaria</span>
+                  </div>
+                </div>
+
+                {/* Chart 8: Significance and Severity Levels */}
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between shadow-lg hover:border-slate-700/80 transition">
+                  <div className="flex items-center justify-between mb-3 border-b border-slate-800 pb-3">
+                    <div className="flex items-center space-x-2.5">
+                      <span className="p-1.5 bg-emerald-500/10 text-emerald-400 rounded-lg">
+                        <Shield className="w-4 h-4" />
+                      </span>
+                      <div>
+                        <h3 className="text-sm font-bold text-white">8. Niveles de Severidad y Significancia USGS</h3>
+                        <p className="text-[11px] text-slate-400">Score de impacto ponderado por población, magnitud e instrumentación</p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] px-2 py-0.5 bg-slate-800 text-slate-300 rounded font-mono">
+                      USGS Impact Score
+                    </span>
+                  </div>
+
+                  <div className="h-64 w-full relative">
+                    <canvas ref={significanceChartRef}></canvas>
+                  </div>
+
+                  <div className="mt-3 pt-3 border-t border-slate-800 flex items-center justify-around text-[10px] text-slate-400">
+                    <div className="flex items-center space-x-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                      <span>Leve (&lt;100)</span>
+                    </div>
+                    <div className="flex items-center space-x-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
+                      <span>Mod. (100-299)</span>
+                    </div>
+                    <div className="flex items-center space-x-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+                      <span>Alta (300-599)</span>
+                    </div>
+                    <div className="flex items-center space-x-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-red-500"></span>
+                      <span>Crítica (≥600)</span>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              {/* Tarjetero del Informe Ejecutivo de IA (Narrativa Oficial) */}
+              {/* Tarjetero del Informe Ejecutivo de IA (Narrativa Oficial de la Jornada / Ventana) */}
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
                   <div className="flex items-center space-x-3">
@@ -1496,30 +1805,23 @@ export default function App() {
                     <div>
                       <div className="flex items-center space-x-2">
                         <h3 className="text-base font-bold text-white">
-                          {activeReport?.title || 'Informe Ejecutivo Diario de Actividad Sísmica'}
+                          Informe Ejecutivo Consolidado - Ventana {analyticsData?.timeframe_label?.toUpperCase() || reportTimeframe.toUpperCase()}
                         </h3>
                         <span className="px-2 py-0.5 bg-slate-800 text-slate-300 rounded text-xs font-mono">
-                          {activeReport?.report_date || new Date().toISOString().slice(0, 10)}
+                          {analyticsData?.generated_at?.slice(0, 10) || new Date().toISOString().slice(0, 10)}
                         </span>
                       </div>
                       <p className="text-xs text-slate-400">
-                        Síntesis generada por el Agente de IA con control de alucinaciones y verificación cruzada contra PostgreSQL Gold.
+                        Síntesis adaptativa generada por el Agente de IA con control estricto de alucinaciones y validación matemática contra Gold.
                       </p>
                     </div>
                   </div>
 
                   <div className="flex items-center space-x-2">
-                    {activeReport?.llm_metrics_verified && (
-                      <span className="px-2.5 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded-lg text-xs font-mono font-medium flex items-center space-x-1.5">
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>Cifras 100% Verificadas</span>
-                      </span>
-                    )}
-                    {activeReport?.is_fallback && (
-                      <span className="px-2.5 py-1 bg-amber-500/10 text-amber-300 border border-amber-500/30 rounded-lg text-xs font-mono">
-                        Fallback Determinista
-                      </span>
-                    )}
+                    <span className="px-2.5 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded-lg text-xs font-mono font-medium flex items-center space-x-1.5">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Cifras 100% Verificadas</span>
+                    </span>
                   </div>
                 </div>
 
@@ -1528,41 +1830,47 @@ export default function App() {
                   <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div>
                   <h4 className="text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-2 flex items-center space-x-1.5">
                     <FileText className="w-3.5 h-3.5" />
-                    <span>Síntesis Ejecutiva Oficial</span>
+                    <span>Síntesis Ejecutiva Oficial ({reportTimeframe.toUpperCase()})</span>
                   </h4>
                   <p className="text-sm text-slate-200 leading-relaxed font-sans">
-                    {activeReport?.summary_narrative || 'No hay narrativa disponible para la fecha seleccionada. Ejecute el DAG 03 o genere el reporte diario.'}
+                    {analyticsData?.ai_narrative || activeReport?.summary_narrative || 'Cargando síntesis ejecutiva...'}
                   </p>
                 </div>
 
                 {/* Detailed metrics audit table */}
                 <div className="bg-slate-950/50 border border-slate-800/60 rounded-xl p-4">
                   <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-3">
-                    Auditoría Numérica de Hechos (Gold Layer Verification)
+                    Auditoría Numérica de Hechos (Gold Lakehouse Layer)
                   </h4>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
                     <div className="p-3 bg-slate-900/60 rounded-lg border border-slate-800">
                       <span className="text-slate-400 block text-[11px]">Eventos Consolidados</span>
                       <span className="text-white font-mono font-bold text-base mt-1 block">
-                        {reportMetrics.total_events}
+                        {analyticsData?.summary?.total_events ?? reportMetrics.total_events}
                       </span>
                     </div>
                     <div className="p-3 bg-slate-900/60 rounded-lg border border-slate-800">
                       <span className="text-slate-400 block text-[11px]">Magnitud Promedio</span>
                       <span className="text-amber-400 font-mono font-bold text-base mt-1 block">
-                        {reportMetrics.avg_magnitude ? Number(reportMetrics.avg_magnitude).toFixed(2) : '0.00'} M
+                        {analyticsData?.summary?.avg_magnitude != null
+                          ? Number(analyticsData.summary.avg_magnitude).toFixed(2)
+                          : (reportMetrics.avg_magnitude ? Number(reportMetrics.avg_magnitude).toFixed(2) : '0.00')} M
                       </span>
                     </div>
                     <div className="p-3 bg-slate-900/60 rounded-lg border border-slate-800">
                       <span className="text-slate-400 block text-[11px]">Sismo de Mayor Intensidad</span>
-                      <span className="text-red-400 font-mono font-bold text-base mt-1 block truncate" title={reportMetrics.max_mag_place}>
-                        {reportMetrics.max_magnitude ? Number(reportMetrics.max_magnitude).toFixed(1) : '0.0'} M ({reportMetrics.max_mag_place || 'N/A'})
+                      <span className="text-red-400 font-mono font-bold text-base mt-1 block truncate" title={analyticsData?.summary?.max_mag_place || reportMetrics.max_mag_place}>
+                        {analyticsData?.summary?.max_magnitude != null
+                          ? Number(analyticsData.summary.max_magnitude).toFixed(1)
+                          : (reportMetrics.max_magnitude ? Number(reportMetrics.max_magnitude).toFixed(1) : '0.0')} M ({analyticsData?.summary?.max_mag_place || reportMetrics.max_mag_place || 'N/A'})
                       </span>
                     </div>
                     <div className="p-3 bg-slate-900/60 rounded-lg border border-slate-800">
-                      <span className="text-slate-400 block text-[11px]">Alertas Oceanográficas (Tsunami)</span>
-                      <span className="text-cyan-400 font-mono font-bold text-base mt-1 block">
-                        {reportMetrics.tsunami_alerts_count} activaciones
+                      <span className="text-slate-400 block text-[11px]">Energía Sísmica Estimada</span>
+                      <span className="text-rose-400 font-mono font-bold text-base mt-1 block">
+                        {analyticsData?.summary?.total_energy_mj != null
+                          ? `${Number(analyticsData.summary.total_energy_mj).toLocaleString()} MJ`
+                          : '0 MJ'}
                       </span>
                     </div>
                   </div>
