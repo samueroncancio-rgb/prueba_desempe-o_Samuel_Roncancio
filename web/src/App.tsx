@@ -18,6 +18,79 @@ interface UserSession {
   token: string;
 }
 
+// Subcomponent for interactive charts inside SismoBot chat bubbles
+function ChatBubbleChart({ chartConfig }: { chartConfig: any }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const chartInstance = useRef<any>(null);
+
+  useEffect(() => {
+    if (!canvasRef.current || !chartConfig) return;
+
+    if (chartInstance.current) {
+      chartInstance.current.destroy();
+      chartInstance.current = null;
+    }
+
+    try {
+      const isDoughnut = chartConfig.type === 'doughnut' || chartConfig.type === 'pie';
+      chartInstance.current = new Chart(canvasRef.current, {
+        type: chartConfig.type || 'bar',
+        data: {
+          labels: chartConfig.labels || [],
+          datasets: chartConfig.datasets || []
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              display: isDoughnut,
+              position: 'bottom',
+              labels: { color: '#cbd5e1', font: { size: 10 }, padding: 8 }
+            },
+            tooltip: {
+              backgroundColor: '#0f172a',
+              borderColor: '#334155',
+              borderWidth: 1,
+              padding: 8
+            }
+          },
+          scales: isDoughnut ? {} : {
+            x: { grid: { color: 'rgba(51, 65, 85, 0.2)' }, ticks: { color: '#94a3b8', font: { size: 10 } } },
+            y: { grid: { color: 'rgba(51, 65, 85, 0.3)' }, ticks: { color: '#94a3b8', precision: 0 } }
+          }
+        }
+      });
+    } catch (e) {
+      console.error('Error rendering chart in chat bubble:', e);
+    }
+
+    return () => {
+      if (chartInstance.current) {
+        chartInstance.current.destroy();
+        chartInstance.current = null;
+      }
+    };
+  }, [chartConfig]);
+
+  return (
+    <div className="mt-3 p-3.5 bg-slate-950/85 rounded-xl border border-slate-700/80 shadow-md">
+      <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-800">
+        <span className="text-xs font-bold text-emerald-400 flex items-center space-x-1.5">
+          <BarChart2 className="w-3.5 h-3.5" />
+          <span>{chartConfig.title || 'Gráfica Generada por SismoBot'}</span>
+        </span>
+        <span className="text-[10px] px-2 py-0.5 bg-slate-800 text-slate-300 rounded font-mono uppercase">
+          {chartConfig.type}
+        </span>
+      </div>
+      <div className="h-44 w-full relative">
+        <canvas ref={canvasRef}></canvas>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [session, setSession] = useState<UserSession | null>(() => {
     const saved = localStorage.getItem('sismowatch_session');
@@ -41,13 +114,18 @@ export default function App() {
   const [loading, setLoading] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // RAG Chatbot Drawer
+  // RAG Chatbot Fullscreen Command Center state
   const [chatOpen, setChatOpen] = useState<boolean>(false);
-  const [chatMessages, setChatMessages] = useState<Array<{ sender: 'user' | 'bot'; text: string; sources?: any[] }>>([
-    { sender: 'bot', text: '¡Hola! Soy SismoBot, el agente de IA de SismoWatch. Puedo responder tus preguntas sobre sismos recientes, alertas de tsunami, anomalías espaciales y el pipeline Lakehouse.' }
+  const [chatMessages, setChatMessages] = useState<Array<{ sender: 'user' | 'bot'; text: string; sources?: any[]; chart?: any; id?: string }>>([
+    { 
+      sender: 'bot', 
+      text: '¡Hola! 👋 Soy SismoBot, el agente de IA y análisis geofísico de SismoWatch. Puedo responder tus preguntas sobre sismos recientes, alertas de tsunami, anomalías espaciales y generar gráficas interactivas en vivo. ¿En qué puedo ayudarte hoy?' 
+    }
   ]);
   const [inputMessage, setInputMessage] = useState<string>('');
   const [chatLoading, setChatLoading] = useState<boolean>(false);
+  const chatMapRef = useRef<any>(null);
+  const chatMessagesEndRef = useRef<HTMLDivElement | null>(null);
 
   // Login Form State
   const [loginUsername, setLoginUsername] = useState('admin@sismowatch.com');
@@ -772,13 +850,81 @@ export default function App() {
     };
   }, [activeTab, analyticsData, reports, events, timeseriesData, reportTimeframe]);
 
-  // Send RAG Chat Message
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inputMessage.trim() || !session) return;
-    const msg = inputMessage.trim();
+  // Fullscreen Chatbot Satellite Background Map
+  useEffect(() => {
+    if (!chatOpen) {
+      if (chatMapRef.current) {
+        try {
+          chatMapRef.current.remove();
+        } catch (e) {}
+        chatMapRef.current = null;
+      }
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      const el = document.getElementById('chat-satellite-bg-map');
+      if (!el) return;
+
+      if ((el as any)._leaflet_id) {
+        delete (el as any)._leaflet_id;
+      }
+
+      const map = L.map(el, {
+        center: [20, 0],
+        zoom: 2,
+        minZoom: 1.5,
+        maxZoom: 18,
+        zoomControl: false,
+        attributionControl: false
+      });
+
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 19
+      }).addTo(map);
+
+      // Render red seismic points on satellite background
+      events.forEach((ev: any) => {
+        const lat = parseFloat(ev.latitude);
+        const lon = parseFloat(ev.longitude);
+        if (!isNaN(lat) && !isNaN(lon)) {
+          L.circleMarker([lat, lon], {
+            radius: Math.max(6, (parseFloat(ev.mag) || 1) * 3),
+            color: '#ef4444',
+            weight: 1.5,
+            fillColor: '#dc2626',
+            fillOpacity: 0.7
+          }).addTo(map);
+        }
+      });
+
+      chatMapRef.current = map;
+    }, 150);
+
+    return () => {
+      clearTimeout(timer);
+      if (chatMapRef.current) {
+        try {
+          chatMapRef.current.remove();
+        } catch (e) {}
+        chatMapRef.current = null;
+      }
+    };
+  }, [chatOpen, events]);
+
+  // Smooth scroll down when chat messages update
+  useEffect(() => {
+    if (chatOpen && chatMessagesEndRef.current) {
+      chatMessagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [chatMessages, chatOpen]);
+
+  // Send RAG Chat Message or Quick Question
+  const submitMessage = async (msgText: string) => {
+    if (!msgText.trim() || !session) return;
+    const msg = msgText.trim();
     setInputMessage('');
-    setChatMessages(prev => [...prev, { sender: 'user', text: msg }]);
+    setChatMessages(prev => [...prev, { sender: 'user', text: msg, id: `user-${Date.now()}` }]);
     setChatLoading(true);
 
     try {
@@ -793,7 +939,13 @@ export default function App() {
       const data = await res.json();
       setChatMessages(prev => [
         ...prev, 
-        { sender: 'bot', text: data.reply, sources: data.sources }
+        { 
+          sender: 'bot', 
+          text: data.reply, 
+          sources: data.sources,
+          chart: data.chart,
+          id: `bot-${Date.now()}` 
+        }
       ]);
     } catch (err) {
       setChatMessages(prev => [
@@ -803,6 +955,11 @@ export default function App() {
     } finally {
       setChatLoading(false);
     }
+  };
+
+  const handleSendMessage = (e: React.FormEvent) => {
+    e.preventDefault();
+    submitMessage(inputMessage);
   };
 
   // Admin trigger backfill
@@ -975,11 +1132,12 @@ export default function App() {
           </button>
 
           <button
-            onClick={() => setChatOpen(!chatOpen)}
-            className="flex items-center space-x-1.5 px-3 py-1.5 bg-indigo-600/30 hover:bg-indigo-600/40 text-indigo-300 border border-indigo-500/40 rounded-lg text-xs font-semibold transition"
+            onClick={() => setChatOpen(true)}
+            className="flex items-center space-x-2 px-3.5 py-1.5 bg-gradient-to-r from-indigo-600/40 to-emerald-600/40 hover:from-indigo-600/60 hover:to-emerald-600/60 text-emerald-300 border border-emerald-500/40 rounded-xl text-xs font-semibold transition shadow-md shadow-emerald-950/40"
           >
-            <Bot className="w-4 h-4" />
-            <span>SismoBot RAG</span>
+            <Bot className="w-4 h-4 text-emerald-400" />
+            <span>SismoBot IA</span>
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
           </button>
 
           {/* User profile badge */}
@@ -1973,70 +2131,168 @@ export default function App() {
         </main>
       </div>
 
-      {/* RAG AI CHATBOT DRAWER */}
+      {/* FULL-SCREEN COMMAND-CENTER AI CHATBOT WITH EARTH SATELLITE MAP BACKGROUND */}
       {chatOpen && (
-        <div className="fixed bottom-4 right-4 w-96 h-[520px] bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl flex flex-col z-50 overflow-hidden">
-          {/* Header */}
-          <div className="p-3.5 bg-slate-800/80 border-b border-slate-700 flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <Bot className="w-5 h-5 text-indigo-400" />
+        <div className="fixed inset-0 z-50 overflow-hidden flex flex-col bg-slate-950">
+          {/* Background Leaflet Satellite Map Layer */}
+          <div id="chat-satellite-bg-map" className="absolute inset-0 z-0"></div>
+
+          {/* Dark Glass Overlay with Subtle Blur */}
+          <div className="absolute inset-0 z-0 bg-slate-950/70 backdrop-blur-[2px] pointer-events-none"></div>
+
+          {/* Top Bar inside Fullscreen */}
+          <div className="relative z-10 px-6 py-3.5 flex items-center justify-between bg-slate-900/85 backdrop-blur-md border-b border-slate-800">
+            <div className="flex items-center space-x-3">
+              <div className="p-2.5 bg-gradient-to-br from-indigo-500/30 to-emerald-500/30 text-emerald-400 rounded-xl border border-emerald-500/40 shadow-lg">
+                <Bot className="w-5 h-5" />
+              </div>
               <div>
-                <h4 className="text-xs font-bold text-white">SismoBot • RAG Especialista</h4>
-                <span className="text-[10px] text-emerald-400">pgvector HNSW (768d)</span>
+                <div className="flex items-center space-x-2">
+                  <h2 className="text-sm sm:text-base font-bold text-white tracking-tight">SismoBot • Consola de Inteligencia Sísmica Multimodal</h2>
+                  <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full text-[10px] font-mono font-semibold flex items-center space-x-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span>ONLINE • PGVECTOR</span>
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Fondo en vivo: Satélite Planeta Tierra • Respuestas multimodales asistidas con gráficas interactivas
+                </p>
               </div>
             </div>
-            <button 
-              onClick={() => setChatOpen(false)}
-              className="p-1 text-slate-400 hover:text-white rounded"
-            >
-              <XCircle className="w-4 h-4" />
-            </button>
+
+            <div className="flex items-center space-x-3">
+              <div className="hidden md:flex items-center space-x-1.5 px-3 py-1 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-emerald-400 text-xs font-mono">
+                <Shield className="w-3.5 h-3.5" />
+                <span>Firewall Anti-Prompt Injection & XSS Activo</span>
+              </div>
+
+              <button
+                onClick={() => setChatOpen(false)}
+                className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition shadow-lg"
+              >
+                <XCircle className="w-4 h-4 text-red-400" />
+                <span>Cerrar Chat</span>
+              </button>
+            </div>
           </div>
 
-          {/* Messages */}
-          <div className="flex-1 p-3 overflow-y-auto space-y-3 text-xs">
-            {chatMessages.map((m, idx) => (
-              <div key={idx} className={`flex flex-col ${m.sender === 'user' ? 'items-end' : 'items-start'}`}>
-                <div className={`p-3 rounded-xl max-w-[85%] leading-relaxed ${m.sender === 'user' ? 'bg-emerald-600 text-white rounded-br-none' : 'bg-slate-800 text-slate-200 rounded-bl-none border border-slate-700/60'}`}>
-                  {m.text}
-                </div>
-                {m.sources && m.sources.length > 0 && (
-                  <div className="mt-1 space-y-0.5 text-[10px] text-slate-500">
-                    <span>Fuentes citadas:</span>
-                    {m.sources.map((s, i) => (
-                      <span key={i} className="inline-block ml-1 px-1.5 py-0.2 bg-slate-800 rounded font-mono text-indigo-400">
-                        {s.ref_id} (sim: {s.similarity})
-                      </span>
-                    ))}
+          {/* Floating Command Center Console */}
+          <div className="relative z-10 flex-1 max-w-5xl w-full mx-auto my-3 px-4 flex flex-col min-h-0">
+            <div className="flex-1 flex flex-col bg-slate-900/90 backdrop-blur-xl border border-slate-800/90 rounded-2xl shadow-2xl overflow-hidden">
+              {/* Messages Scrollable Feed */}
+              <div className="flex-1 p-5 overflow-y-auto space-y-4 text-xs">
+                {chatMessages.map((m: any, idx: number) => (
+                  <div key={idx} className={`flex flex-col ${m.sender === 'user' ? 'items-end' : 'items-start'}`}>
+                    <div className="flex items-center space-x-2 mb-1 px-1">
+                      {m.sender === 'bot' ? (
+                        <span className="text-[11px] font-bold text-emerald-400 flex items-center space-x-1">
+                          <Bot className="w-3.5 h-3.5" />
+                          <span>SismoBot IA</span>
+                        </span>
+                      ) : (
+                        <span className="text-[11px] font-bold text-indigo-300">Tú</span>
+                      )}
+                    </div>
+
+                    <div className={`p-4 rounded-2xl max-w-[85%] leading-relaxed ${
+                      m.sender === 'user'
+                        ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-tr-none shadow-md'
+                        : 'bg-slate-950/90 text-slate-200 rounded-tl-none border border-slate-800 shadow-lg'
+                    }`}>
+                      <div className="whitespace-pre-wrap font-sans text-xs sm:text-sm">
+                        {m.text}
+                      </div>
+
+                      {/* Interactive Chart Component if payload exists */}
+                      {m.chart && (
+                        <ChatBubbleChart chartConfig={m.chart} />
+                      )}
+                    </div>
+
+                    {/* Sources pills */}
+                    {m.sources && m.sources.length > 0 && (
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 px-1 text-[10px] text-slate-400">
+                        <span className="font-semibold text-slate-500">Fuentes consultadas:</span>
+                        {m.sources.map((s: any, i: number) => (
+                          <span key={i} className="px-2 py-0.5 bg-slate-800/90 border border-slate-700/60 rounded font-mono text-indigo-400">
+                            {s.ref_id} (sim: {s.similarity})
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+
+                {chatLoading && (
+                  <div className="flex items-center space-x-2 p-3 bg-slate-950/80 border border-slate-800 rounded-xl max-w-sm text-slate-400 text-xs italic">
+                    <RefreshCw className="w-4 h-4 animate-spin text-emerald-400" />
+                    <span>SismoBot consultando pgvector y generando gráfica interactiva...</span>
                   </div>
                 )}
+                <div ref={chatMessagesEndRef} />
               </div>
-            ))}
-            {chatLoading && (
-              <div className="flex items-center space-x-2 text-slate-400 text-xs italic">
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                <span>Consultando pgvector y generando respuesta...</span>
-              </div>
-            )}
-          </div>
 
-          {/* Input form */}
-          <form onSubmit={handleSendMessage} className="p-3 bg-slate-800/50 border-t border-slate-800 flex items-center space-x-2">
-            <input
-              type="text"
-              value={inputMessage}
-              onChange={e => setInputMessage(e.target.value)}
-              placeholder="Pregunta sobre sismos o el pipeline..."
-              className="flex-1 px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white focus:outline-none focus:border-indigo-500"
-            />
-            <button
-              type="submit"
-              disabled={chatLoading}
-              className="p-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition"
-            >
-              <Send className="w-3.5 h-3.5" />
-            </button>
-          </form>
+              {/* Quick Suggestion Chips */}
+              <div className="px-5 py-2.5 bg-slate-950/60 border-t border-slate-800 flex items-center space-x-2 overflow-x-auto no-scrollbar">
+                <span className="text-[10px] font-semibold text-slate-400 whitespace-nowrap">Sugerencias:</span>
+                <button
+                  onClick={() => submitMessage('¡Hola! Buenas tardes SismoBot')}
+                  className="px-2.5 py-1 bg-slate-800/80 hover:bg-slate-700 text-slate-200 rounded-lg text-[11px] whitespace-nowrap transition border border-slate-700"
+                >
+                  👋 Saludo inicial
+                </button>
+                <button
+                  onClick={() => submitMessage('Muestra una gráfica de la distribución de magnitudes')}
+                  className="px-2.5 py-1 bg-slate-800/80 hover:bg-slate-700 text-emerald-300 rounded-lg text-[11px] whitespace-nowrap transition border border-emerald-500/30"
+                >
+                  📊 Gráfica de magnitudes
+                </button>
+                <button
+                  onClick={() => submitMessage('¿Cuáles son las regiones con más sismos? Muestra un gráfico')}
+                  className="px-2.5 py-1 bg-slate-800/80 hover:bg-slate-700 text-sky-300 rounded-lg text-[11px] whitespace-nowrap transition border border-sky-500/30"
+                >
+                  🗺️ Gráfica de regiones
+                </button>
+                <button
+                  onClick={() => submitMessage('¿Cuál es la profundidad de los sismos y cómo se clasifican?')}
+                  className="px-2.5 py-1 bg-slate-800/80 hover:bg-slate-700 text-amber-300 rounded-lg text-[11px] whitespace-nowrap transition border border-amber-500/30"
+                >
+                  🌋 Gráfica de profundidad
+                </button>
+                <button
+                  onClick={() => submitMessage('¿Cuál fue el sismo más fuerte recientemente?')}
+                  className="px-2.5 py-1 bg-slate-800/80 hover:bg-slate-700 text-rose-300 rounded-lg text-[11px] whitespace-nowrap transition border border-rose-500/30"
+                >
+                  🔥 Sismo más fuerte
+                </button>
+                <button
+                  onClick={() => submitMessage('Explica la arquitectura Lakehouse Bronze, Silver y Gold')}
+                  className="px-2.5 py-1 bg-slate-800/80 hover:bg-slate-700 text-indigo-300 rounded-lg text-[11px] whitespace-nowrap transition border border-indigo-500/30"
+                >
+                  🏗️ Arquitectura
+                </button>
+              </div>
+
+              {/* Input Form */}
+              <form onSubmit={handleSendMessage} className="p-3.5 bg-slate-950/80 border-t border-slate-800 flex items-center space-x-3">
+                <input
+                  type="text"
+                  value={inputMessage}
+                  onChange={e => setInputMessage(e.target.value)}
+                  placeholder="Escribe tu consulta o pide un gráfico (ej. 'grafica las magnitudes' o '¿cuál fue el sismo más fuerte?')..."
+                  className="flex-1 px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs sm:text-sm text-white focus:outline-none focus:border-emerald-500 transition shadow-inner"
+                />
+                <button
+                  type="submit"
+                  disabled={chatLoading || !inputMessage.trim()}
+                  className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl font-semibold flex items-center space-x-1.5 transition shadow-lg shadow-emerald-900/30 text-xs sm:text-sm"
+                >
+                  <span>Enviar</span>
+                  <Send className="w-3.5 h-3.5" />
+                </button>
+              </form>
+            </div>
+          </div>
         </div>
       )}
     </div>

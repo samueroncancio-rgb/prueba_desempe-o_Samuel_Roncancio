@@ -87,3 +87,5 @@ class ChatMessageResponse(BaseModel):
     is_domain_pertinent: bool
     sources: List[Dict[str, Any]]
     model: str
+    chart: Optional[Dict[str, Any]] = None
+    security_flags: Optional[Dict[str, Any]] = None
