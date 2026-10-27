@@ -198,100 +198,172 @@ export default function App() {
     };
   }, [session]);
 
-  // Initialize Leaflet Map with World View and Red Location Markers
+  // Helper to render bright red location markers on the world map
+  const renderMarkers = (map: any, group: any, eventList: any[]) => {
+    if (!group) return;
+    group.clearLayers();
+    if (!eventList || eventList.length === 0) return;
+
+    eventList.forEach((ev: any) => {
+      const lat = parseFloat(ev.latitude);
+      const lon = parseFloat(ev.longitude);
+      if (isNaN(lat) || isNaN(lon)) return;
+
+      // Custom high-precision Red Location Pin with animated radar ping
+      const redPinIcon = L.divIcon({
+        className: 'sismowatch-red-marker',
+        html: `
+          <div style="position: relative; display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; cursor: pointer;">
+            <span class="sismo-red-pulse" style="position: absolute; width: 28px; height: 28px; border-radius: 50%; background-color: rgba(239, 68, 68, 0.5);"></span>
+            <span style="position: absolute; width: 18px; height: 18px; border-radius: 50%; background-color: rgba(220, 38, 38, 0.75);"></span>
+            <div style="position: relative; width: 12px; height: 12px; border-radius: 50%; background-color: #dc2626; border: 2.5px solid #ffffff; box-shadow: 0 0 10px rgba(220, 38, 38, 1);"></div>
+          </div>
+        `,
+        iconSize: [34, 34],
+        iconAnchor: [17, 17],
+        popupAnchor: [0, -16]
+      });
+
+      const marker = L.marker([lat, lon], { icon: redPinIcon });
+
+      // Energy Shockwave Halo in transparent red
+      const shockwave = L.circleMarker([lat, lon], {
+        radius: Math.max(12, (parseFloat(ev.mag) || 1) * 4.5),
+        color: '#dc2626',
+        weight: 1.5,
+        opacity: 0.85,
+        fillColor: '#ef4444',
+        fillOpacity: 0.2
+      });
+
+      const popupContent = `
+        <div style="font-family: system-ui, -apple-system, sans-serif; color: #0f172a; padding: 4px; min-width: 220px;">
+          <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px; border-bottom: 2px solid #dc2626; padding-bottom: 4px;">
+            <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background-color: #dc2626; box-shadow: 0 0 6px #dc2626;"></span>
+            <strong style="font-size: 13px; color: #b91c1c; text-transform: uppercase; letter-spacing: 0.5px;">Epicentro Sísmico</strong>
+          </div>
+          <div style="font-size: 13px; font-weight: 700; color: #0f172a; margin-bottom: 6px; line-height: 1.4;">
+            ${ev.place_sanitized || 'Ubicación'}
+          </div>
+          <div style="font-size: 11px; line-height: 1.7; color: #334155;">
+            <div><b>Coordenadas:</b> <span style="font-family: monospace; color: #0369a1; font-weight: 600;">${lat.toFixed(4)}°, ${lon.toFixed(4)}°</span></div>
+            <div><b>Magnitud:</b> <span style="color: #dc2626; font-weight: 800; font-size: 13px;">${ev.mag} ${ev.mag_type || 'M'}</span></div>
+            <div><b>Profundidad:</b> ${ev.depth_km} km</div>
+            <div><b>Alerta Tsunami:</b> ${ev.tsunami_alert ? '<span style="color: #dc2626; font-weight: bold;">⚠️ SÍ</span>' : 'No'}</div>
+            <div><b>Hora UTC:</b> ${new Date(ev.event_time).toUTCString()}</div>
+            <div><b>Estado:</b> <span style="color: #047857; font-weight: 600;">${ev.is_auto_healed ? 'Auto-Curado en vuelo' : 'Limpio en Gold'}</span></div>
+          </div>
+        </div>
+      `;
+
+      marker.bindPopup(popupContent);
+      shockwave.bindPopup(popupContent);
+
+      group.addLayer(shockwave);
+      group.addLayer(marker);
+    });
+  };
+
+  // Initialize Leaflet World Map (Planeta Tierra y Continentes)
   useEffect(() => {
     if (activeTab !== 'dashboard') return;
 
-    const mapContainer = document.getElementById('map-container');
-    if (!mapContainer) return;
+    const mapElement = document.getElementById('map-container');
+    if (!mapElement) return;
 
-    if (!mapRef.current) {
-      const map = L.map('map-container', {
-        center: [20, 0],
-        zoom: 2,
-        minZoom: 1.5,
-        maxZoom: 18,
-        worldCopyJump: true
-      });
+    // Reset previous instance cleanly to prevent 'already initialized' crashes
+    if (mapRef.current) {
+      try {
+        mapRef.current.remove();
+      } catch (e) {}
+      mapRef.current = null;
+    }
 
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    if ((mapElement as any)._leaflet_id) {
+      delete (mapElement as any)._leaflet_id;
+    }
+
+    // World Map centered on Earth showing all continents
+    const map = L.map(mapElement, {
+      center: [15, 0],
+      zoom: 2,
+      minZoom: 1.5,
+      maxZoom: 18,
+      worldCopyJump: true,
+      zoomControl: true
+    });
+
+    // 1. Full-Color Physical/Political World Map (Clear Continents, Blue Oceans, Country Borders)
+    const continentsLayer = L.tileLayer(
+      'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+      {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
         subdomains: 'abcd',
         maxZoom: 19
-      }).addTo(map);
+      }
+    );
 
-      const markersGroup = L.layerGroup().addTo(map);
-      markersGroupRef.current = markersGroup;
-      mapRef.current = map;
+    // 2. Real Satellite World Imagery of Earth from Space
+    const satelliteLayer = L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      {
+        attribution: 'Tiles &copy; Esri, Earthstar Geographics',
+        maxZoom: 19
+      }
+    );
+
+    // 3. Topographic World Map
+    const topoLayer = L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+      {
+        attribution: 'Tiles &copy; Esri &mdash; National Geographic',
+        maxZoom: 19
+      }
+    );
+
+    // Add continentsLayer as primary default map
+    continentsLayer.addTo(map);
+
+    // Add interactive layer selector in top-right
+    L.control.layers(
+      {
+        "🗺️ Mapa Continentes y Países": continentsLayer,
+        "🛰️ Satélite Planeta Tierra": satelliteLayer,
+        "⛰️ Relieve y Topografía": topoLayer
+      },
+      null,
+      { position: 'topright' }
+    ).addTo(map);
+
+    const markersGroup = L.layerGroup().addTo(map);
+    markersGroupRef.current = markersGroup;
+    mapRef.current = map;
+
+    // Render red earthquake points
+    renderMarkers(map, markersGroup, events);
+
+    // Smooth resize trigger
+    const timer = setTimeout(() => {
+      map.invalidateSize();
+    }, 200);
+
+    return () => {
+      clearTimeout(timer);
+      if (mapRef.current) {
+        try {
+          mapRef.current.remove();
+        } catch (e) {}
+        mapRef.current = null;
+      }
+    };
+  }, [activeTab]);
+
+  // Update red markers when events update
+  useEffect(() => {
+    if (mapRef.current && markersGroupRef.current) {
+      renderMarkers(mapRef.current, markersGroupRef.current, events);
     }
-
-    // Refresh markers with accurate red location points
-    if (markersGroupRef.current) {
-      markersGroupRef.current.clearLayers();
-
-      events.forEach((ev: any) => {
-        if (ev.latitude == null || ev.longitude == null) return;
-
-        // Custom red location point with pulsating radar glow
-        const redPinIcon = L.divIcon({
-          className: 'sismowatch-red-marker',
-          html: `
-            <div style="position: relative; display: flex; align-items: center; justify-content: center; width: 34px; height: 34px;">
-              <span class="sismo-red-pulse" style="position: absolute; width: 28px; height: 28px; border-radius: 50%; background-color: rgba(239, 68, 68, 0.45);"></span>
-              <span style="position: absolute; width: 18px; height: 18px; border-radius: 50%; background-color: rgba(220, 38, 38, 0.65);"></span>
-              <div style="position: relative; width: 12px; height: 12px; border-radius: 50%; background-color: #ef4444; border: 2.5px solid #ffffff; box-shadow: 0 0 10px rgba(239, 68, 68, 1);"></div>
-            </div>
-          `,
-          iconSize: [34, 34],
-          iconAnchor: [17, 17],
-          popupAnchor: [0, -16]
-        });
-
-        const marker = L.marker([ev.latitude, ev.longitude], { icon: redPinIcon });
-
-        // Seismic shockwave halo in transparent red
-        const shockwave = L.circleMarker([ev.latitude, ev.longitude], {
-          radius: Math.max(12, (ev.mag || 1) * 4.5),
-          color: '#ef4444',
-          weight: 1.5,
-          opacity: 0.85,
-          fillColor: '#ef4444',
-          fillOpacity: 0.18
-        });
-
-        const popupContent = `
-          <div style="font-family: system-ui, -apple-system, sans-serif; color: #f8fafc; padding: 4px; min-width: 210px;">
-            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px;">
-              <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background-color: #ef4444; box-shadow: 0 0 6px #ef4444;"></span>
-              <strong style="font-size: 13px; color: #f87171; text-transform: uppercase; letter-spacing: 0.5px;">Epicentro Sísmico</strong>
-            </div>
-            <div style="font-size: 13px; font-weight: 600; color: #ffffff; margin-bottom: 6px; line-height: 1.4;">
-              ${ev.place_sanitized || 'Ubicación no especificada'}
-            </div>
-            <div style="font-size: 11px; line-height: 1.6; color: #cbd5e1; border-top: 1px solid #334155; padding-top: 6px;">
-              <div><b>Coordenadas:</b> <span style="font-family: monospace; color: #38bdf8;">${Number(ev.latitude).toFixed(4)}°, ${Number(ev.longitude).toFixed(4)}°</span></div>
-              <div><b>Magnitud:</b> <span style="color: #ef4444; font-weight: 800; font-size: 12px;">${ev.mag} ${ev.mag_type || 'M'}</span></div>
-              <div><b>Profundidad:</b> ${ev.depth_km} km</div>
-              <div><b>Alerta Tsunami:</b> ${ev.tsunami_alert ? '<span style="color: #ef4444; font-weight: bold;">⚠️ SÍ</span>' : 'No'}</div>
-              <div><b>Hora:</b> ${new Date(ev.event_time).toLocaleString()}</div>
-              <div><b>Estado:</b> <span style="color: #34d399; font-weight: 600;">${ev.is_auto_healed ? 'Auto-Curado en vuelo' : 'Limpio en Gold'}</span></div>
-            </div>
-          </div>
-        `;
-
-        marker.bindPopup(popupContent);
-        shockwave.bindPopup(popupContent);
-
-        markersGroupRef.current?.addLayer(shockwave);
-        markersGroupRef.current?.addLayer(marker);
-      });
-    }
-
-    setTimeout(() => {
-      mapRef.current?.invalidateSize();
-    }, 150);
-
-  }, [activeTab, events]);
+  }, [events]);
 
   // Send RAG Chat Message
   const handleSendMessage = async (e: React.FormEvent) => {

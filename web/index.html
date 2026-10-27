@@ -32,30 +32,49 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
       body { font-family: 'Inter', sans-serif; }
-      /* Custom Red Seismic Location Pin & Pulse */
+      /* Custom Red Seismic Location Pin & Radar Pulse */
       @keyframes sismoRadarPing {
         0% { transform: scale(0.85); opacity: 0.95; }
         70% { transform: scale(2.8); opacity: 0.15; }
         100% { transform: scale(3.4); opacity: 0; }
       }
       .sismo-red-pulse {
-        animation: sismoRadarPing 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+        animation: sismoRadarPing 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
         transform-origin: center center;
       }
-      /* Dark Theme Leaflet Popups */
+      /* Clean High-Contrast Leaflet Popups */
       .leaflet-popup-content-wrapper {
-        background-color: #0f172a !important;
-        color: #f8fafc !important;
+        background-color: #ffffff !important;
+        color: #0f172a !important;
         border-radius: 12px !important;
-        border: 1px solid #334155 !important;
-        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.6) !important;
+        border: 1.5px solid #e2e8f0 !important;
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.4) !important;
       }
       .leaflet-popup-tip {
-        background-color: #0f172a !important;
-        border: 1px solid #334155 !important;
+        background-color: #ffffff !important;
+        border: 1.5px solid #e2e8f0 !important;
       }
       .leaflet-container {
         font-family: 'Inter', sans-serif !important;
+        background-color: #c4e1f6 !important; /* Ocean blue natural placeholder */
+      }
+      /* Layer Switcher Control */
+      .leaflet-control-layers {
+        background: rgba(15, 23, 42, 0.95) !important;
+        color: #ffffff !important;
+        border: 1px solid #475569 !important;
+        border-radius: 10px !important;
+        padding: 8px 12px !important;
+        font-size: 12px !important;
+        font-weight: 500 !important;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5) !important;
+      }
+      .leaflet-control-layers-base label {
+        margin-bottom: 5px !important;
+        cursor: pointer !important;
+        display: flex !important;
+        align-items: center !important;
+        gap: 6px !important;
       }
     </style>
   </head>
