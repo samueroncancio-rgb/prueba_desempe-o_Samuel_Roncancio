@@ -113,6 +113,17 @@ def usgs_ingestion_bronze():
             object_name=object_name,
             data=raw_payload
         )
+        # Also maintain latest pointers for zero-configuration consumers
+        lakehouse_client.put_object(
+            bucket_name=config.minio_bucket_bronze,
+            object_name="latest.geojson",
+            data=raw_payload
+        )
+        lakehouse_client.put_object(
+            bucket_name=config.minio_bucket_bronze,
+            object_name=f"{now.year}/{now.month:02d}/{now.day:02d}/latest.geojson",
+            data=raw_payload
+        )
         logger.info(f"Guardado exitoso en Bronze: SHA256={result['sha256']}, bytes={result['bytes_length']}")
         return object_name
 

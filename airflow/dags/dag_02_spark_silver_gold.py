@@ -19,13 +19,14 @@ from airflow.decorators import dag, task
 from airflow.datasets import Dataset
 
 from airflow.include.config import config
+from airflow.include.minio_client import lakehouse_client
 from airflow.include.spark_jobs.medallion_etl import MedallionETLJob
 from airflow.include.error_handler import on_failure_alert
 
 logger = logging.getLogger("airflow.dag_02_spark_silver_gold")
 
 BRONZE_DATASET = Dataset(f"s3a://{config.minio_bucket_bronze}/latest")
-GOLD_DATASET = Dataset("postgres://gold/fact_earthquake_events")
+GOLD_DATASET = Dataset(f"postgres://{config.postgres_host}:{config.postgres_port}/{config.postgres_db}/gold/fact_earthquake_events")
 
 default_args = {
     "owner": "sismowatch_data_architect",
@@ -60,11 +61,15 @@ def spark_silver_gold():
         ti = context.get("ti")
         bronze_obj = None
         if ti:
-            bronze_obj = ti.xcom_pull(dag_id="dag_01_usgs_ingestion_bronze", task_ids="extract_and_load_to_minio_bronze")
+            bronze_obj = ti.xcom_pull(dag_id="dag_01_usgs_ingestion_bronze", task_ids="extract_and_load_to_minio_bronze", include_prior_dates=True)
 
         if not bronze_obj:
-            now = datetime.utcnow()
-            bronze_obj = f"{now.year}/{now.month:02d}/{now.day:02d}/latest.geojson"
+            latest_in_lake = lakehouse_client.get_latest_object(config.minio_bucket_bronze)
+            if latest_in_lake:
+                bronze_obj = latest_in_lake
+            else:
+                now = datetime.utcnow()
+                bronze_obj = f"{now.year}/{now.month:02d}/{now.day:02d}/latest.geojson"
 
         logger.info(f"Iniciando procesamiento Medallion para objeto Bronze: {bronze_obj}")
         etl_job = MedallionETLJob()

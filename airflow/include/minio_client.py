@@ -103,4 +103,31 @@ class S3MinioClient:
                 return f.read()
         raise FileNotFoundError(f"Object {bucket_name}/{object_name} not found in Lakehouse.")
 
+    def list_objects(self, bucket_name: str, prefix: str = "") -> list:
+        """Lists all keys in a bucket matching a prefix."""
+        keys = []
+        if self._s3_client:
+            try:
+                paginator = self._s3_client.get_paginator("list_objects_v2")
+                for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
+                    for obj in page.get("Contents", []):
+                        keys.append(obj["Key"])
+            except Exception as e:
+                logger.warning(f"S3 list_objects failed: {e}. Falling back to local mirror.")
+        
+        # Local mirror lookup
+        local_dir = os.path.join(self.local_storage_root, bucket_name)
+        if os.path.exists(local_dir):
+            for root, _, files in os.walk(local_dir):
+                for f in files:
+                    rel_path = os.path.relpath(os.path.join(root, f), local_dir)
+                    if rel_path.startswith(prefix) and rel_path not in keys:
+                        keys.append(rel_path)
+        return sorted(keys)
+
+    def get_latest_object(self, bucket_name: str, prefix: str = "") -> Optional[str]:
+        """Finds the most recent object key in Lakehouse."""
+        keys = self.list_objects(bucket_name, prefix)
+        return keys[-1] if keys else None
+
 lakehouse_client = S3MinioClient()

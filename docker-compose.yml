@@ -4,7 +4,7 @@ services:
   # Architectural Constraint: No Bronze or Silver tables exist in this DB.
   # ==============================================================================
   postgres:
-    image: ankane/pgvector:v0.5.1
+    image: pgvector/pgvector:pg16
     container_name: sismowatch_postgres
     restart: always
     environment:
@@ -12,7 +12,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-sismowatch_admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sismowatch_secure_pass_2026}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
       - ./db/init:/docker-entrypoint-initdb.d:ro
       - postgres_data:/var/lib/postgresql/data
@@ -25,39 +25,17 @@ services:
       - sismowatch_net
 
   # ==============================================================================
-  # 2. MinIO S3 Object Storage (DATA LAKE - BRONZE & SILVER LAYERS)
+  # 2. S3 Object Storage (DATA LAKE - BRONZE & SILVER LAYERS)
   # ==============================================================================
   minio:
-    image: minio/minio:latest
+    image: adobe/s3mock:latest
     container_name: sismowatch_minio
     restart: always
-    command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-miniopassword2026}
+      initialBuckets: sismowatch-bronze,sismowatch-silver,sismowatch-gold
     ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - minio_data:/data
-    networks:
-      - sismowatch_net
-
-  # Bucket provisioner for Lakehouse tiers
-  minio-init:
-    image: minio/mc:latest
-    container_name: sismowatch_minio_init
-    depends_on:
-      - minio
-    entrypoint: >
-      /bin/sh -c "
-      sleep 2;
-      /usr/bin/mc alias set myminio http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-miniopassword2026};
-      /usr/bin/mc mb myminio/sismowatch-bronze || true;
-      /usr/bin/mc mb myminio/sismowatch-silver || true;
-      /usr/bin/mc mb myminio/sismowatch-gold || true;
-      exit 0;
-      "
+      - "9000:9090"
+      - "9001:9090"
     networks:
       - sismowatch_net
 
@@ -65,6 +43,7 @@ services:
   # 3. Apache Airflow 2.9 (ORCHESTRATION ENGINE)
   # ==============================================================================
   airflow-init:
+    image: prueba_desempeo_samuel_roncancio-airflow-init:latest
     build:
       context: .
       dockerfile: airflow/Dockerfile
@@ -87,6 +66,7 @@ services:
       - sismowatch_net
 
   airflow-webserver:
+    image: prueba_desempeo_samuel_roncancio-airflow-init:latest
     build:
       context: .
       dockerfile: airflow/Dockerfile
@@ -106,7 +86,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-sismowatch_admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sismowatch_secure_pass_2026}
       DB_SPARK_PASS: ${DB_SPARK_PASS:-spark_etl_secure_pass_2026}
-      MINIO_ENDPOINT: minio:9000
+      MINIO_ENDPOINT: minio:9090
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-miniopassword2026}
       PYTHONPATH: /opt/airflow
@@ -120,6 +100,7 @@ services:
       - sismowatch_net
 
   airflow-scheduler:
+    image: prueba_desempeo_samuel_roncancio-airflow-init:latest
     build:
       context: .
       dockerfile: airflow/Dockerfile
@@ -138,7 +119,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-sismowatch_admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sismowatch_secure_pass_2026}
       DB_SPARK_PASS: ${DB_SPARK_PASS:-spark_etl_secure_pass_2026}
-      MINIO_ENDPOINT: minio:9000
+      MINIO_ENDPOINT: minio:9090
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-miniopassword2026}
       PYTHONPATH: /opt/airflow
@@ -153,6 +134,7 @@ services:
   # 4. FastAPI Platform API (SERVING & INFERENCE)
   # ==============================================================================
   api:
+    image: prueba_desempeo_samuel_roncancio-api:latest
     build:
       context: .
       dockerfile: api/Dockerfile
@@ -171,7 +153,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sismowatch_secure_pass_2026}
       DB_API_READER_PASS: ${DB_API_READER_PASS:-api_reader_secure_pass_2026}
       DB_SPARK_PASS: ${DB_SPARK_PASS:-spark_etl_secure_pass_2026}
-      MINIO_ENDPOINT: minio:9000
+      MINIO_ENDPOINT: minio:9090
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-miniopassword2026}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-sismowatch_enterprise_jwt_ultra_secret_key_2026_xyz}
@@ -191,6 +173,7 @@ services:
   # 5. Web Frontend (REACT + TYPESCRIPT + LEAFLET)
   # ==============================================================================
   web:
+    image: prueba_desempeo_samuel_roncancio-web:latest
     build:
       context: ./web
       dockerfile: Dockerfile

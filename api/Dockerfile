@@ -15,6 +15,7 @@ COPY api/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy airflow include modules for shared architecture and models
+COPY airflow/__init__.py /app/airflow/__init__.py
 COPY airflow/include /app/airflow/include
 COPY api /app/api
 
