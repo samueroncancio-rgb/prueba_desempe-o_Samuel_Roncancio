@@ -47,23 +47,45 @@ def test_rag_agent_rejects_out_of_domain_query(viewer_token):
     assert resp.status_code == 200
     data = resp.json()
     assert data["is_domain_pertinent"] is False
-    assert "Soy el Agente Especializado de SismoWatch" in data["reply"]
+    assert "Soy SismoBot" in data["reply"] or "análisis sísmico" in data["reply"]
     assert len(data["sources"]) == 0
 
 def test_rag_agent_accepts_pertinent_seismic_query(viewer_token):
     """
-    Verifica que el Guardrail acepte consultas sobre sismos y arquitectura de SismoWatch.
+    Verifica que el Guardrail acepte consultas sobre sismos y magnitudes.
     """
     headers = {"Authorization": f"Bearer {viewer_token}"}
     resp = client.post(
         "/api/agent/chat",
-        json={"message": "¿Cuál fue el sismo más fuerte y cuál es la arquitectura del pipeline?"},
+        json={"message": "¿Cuál fue el sismo más fuerte y cuál es la magnitud máxima registrada?"},
         headers=headers
     )
     assert resp.status_code == 200
     data = resp.json()
     assert data["is_domain_pertinent"] is True
-    assert "SismoWatch" in data["reply"] or "magnitud" in data["reply"]
+    assert "magnitud" in data["reply"].lower() or "sismo" in data["reply"].lower()
+
+def test_rag_agent_rejects_architecture_and_lakehouse_query(viewer_token):
+    """
+    Verifica que el Guardrail rechace preguntas sobre arquitectura, capas o Lakehouse.
+    """
+    headers = {"Authorization": f"Bearer {viewer_token}"}
+    for forbidden_query in [
+        "¿Cuál es la arquitectura del proyecto?",
+        "Explica el lakehouse y las capas bronze, silver y gold",
+        "¿Cómo funciona el pipeline de datos?"
+    ]:
+        resp = client.post(
+            "/api/agent/chat",
+            json={"message": forbidden_query},
+            headers=headers
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["is_domain_pertinent"] is False
+        assert "no son temas pertinentes" in data["reply"] or "SismoBot" in data["reply"]
+        assert "Bronze (MinIO)" not in data["reply"]
+        assert "Silver (MinIO)" not in data["reply"]
 
 def test_rag_agent_recognizes_greetings(viewer_token):
     """Verifica que el chatbot reconozca saludos cordiales (Hola, Buenas tardes)."""

@@ -45,20 +45,45 @@ GREETING_PATTERNS = [
     r"^\s*(hola|buenos?\s+d[ií]as?|buenas?\s+tardes?|buenas?\s+noches?|saludos?|qu[eé]\s+tal|hello|hi|hey)\b"
 ]
 
-DOMAIN_KEYWORDS = [
-    "sismo", "terremoto", "temblor", "earthquake", "magnitud", "tsunami",
-    "profundidad", "falla", "epicentro", "usgs", "plataforma", "pipeline",
-    "calidad", "airflow", "spark", "minio", "gold", "silver", "bronze",
-    "reporte", "anomalia", "enjambre", "cuarentena", "auto-remediacion",
-    "arquitectura", "superapp", "sismowatch", "dbscan", "pgvector",
-    "grafica", "gráfico", "grafico", "estadistica", "estadística", "energia", "energía",
-    "region", "región", "zonas", "alaska", "california", "chile", "japon", "japón"
+FORBIDDEN_TECH_PATTERNS = [
+    r"\barquitectura\b",
+    r"\blakehouse\b",
+    r"\bcapas?\b",
+    r"\bbronze\b",
+    r"\bsilver\b",
+    r"\bgold\b",
+    r"\bpipeline\b",
+    r"\bairflow\b",
+    r"\bspark\b",
+    r"\bminio\b",
+    r"\bpostgres(ql)?\b",
+    r"\bpgvector\b",
+    r"\bcuarentena\b",
+    r"\bauto-?remediaci[oó]n\b",
+    r"\binfraestructura\b"
 ]
 
+DOMAIN_KEYWORDS = [
+    "sismo", "sismos", "terremoto", "terremotos", "temblor", "temblores",
+    "earthquake", "earthquakes", "magnitud", "magnitudes", "tsunami", "tsunamis",
+    "profundidad", "profundidades", "falla", "hipocentro", "epicentro", "usgs",
+    "grafica", "graficas", "gráfica", "gráficas", "gráfico", "gráficos", "grafico", "graficos",
+    "estadistica", "estadísticas", "estadística", "estadisticas", "energia", "energía",
+    "region", "región", "regiones", "zonas", "alaska", "california", "chile", "japon", "japón",
+    "evento", "eventos", "actividad", "telurico", "telúrico", "placas", "tectonica", "tectónica"
+]
+
+ARCHITECTURE_REJECTION_MESSAGE = (
+    "Como SismoBot, estoy especializado exclusivamente en el análisis de eventos sísmicos "
+    "y la generación de gráficas interactivas de actividad telúrica. La arquitectura técnica del proyecto, "
+    "sus capas y el Lakehouse no son temas pertinentes para este asistente. "
+    "¿Deseas consultar una gráfica de magnitudes, regiones activas o sismos recientes?"
+)
+
 OUT_OF_DOMAIN_REJECTION_MESSAGE = (
-    "Soy el Agente Especializado de SismoWatch. Solo estoy autorizado para responder consultas "
-    "relacionadas con el monitoreo sísmico, reportes operativos, anomalías detectadas y el "
-    "estado de la arquitectura de datos de este proyecto."
+    "Soy SismoBot, el asistente de análisis sísmico. Únicamente respondo preguntas y genero "
+    "gráficas interactivas sobre eventos sísmicos, magnitudes, ubicaciones geográficas y alertas "
+    "de tsunami. No respondo sobre otros temas o sobre la arquitectura técnica interna."
 )
 
 SECURITY_BLOCKED_MESSAGE = (
@@ -114,14 +139,14 @@ def chat_with_agent(payload: ChatMessageRequest, user: UserProfile = Depends(req
     if is_greeting and len(safe_question.split()) <= 4:
         return ChatMessageResponse(
             reply=(
-                "¡Hola! 👋 Soy **SismoBot**, el agente de inteligencia artificial y análisis geofísico de **SismoWatch**.\n\n"
-                "Puedo ayudarte a analizar sismos globales, consultar la capa Gold y responder con **gráficas interactivas**:\n"
-                "• 📊 **Gráficas en Vivo:** Pídeme *'muestra una gráfica de magnitudes'* o *'grafica las regiones más activas'*.\n"
-                "• 🌍 **Sismos Recientes:** Pregúntame *'¿cuál fue el sismo más fuerte?'* o *'¿cuántos eventos hubo hoy?'*.\n"
-                "• 🌊 **Alertas Oceánicas:** Consulta alertas tempranas de tsunami en boyas DART.\n"
-                "• ⚡ **Energía Sísmica:** Conoce la energía liberada calculada con la relación Gutenberg-Richter.\n"
-                "• 🏗️ **Arquitectura Lakehouse:** Pregúntame sobre el flujo Bronze, Silver y Gold.\n\n"
-                "¿Qué información o gráfico te gustaría consultar ahora?"
+                "¡Hola! 👋 Soy **SismoBot**, el asistente de análisis geofísico y monitoreo sísmico de **SismoWatch**.\n\n"
+                "Estoy especializado exclusivamente en responder consultas sobre eventos sísmicos y generar **gráficas interactivas** en tiempo real:\n"
+                "• 📊 **Gráfica de Magnitudes:** Pídeme *'muestra una gráfica de magnitudes'* para ver la distribución de eventos.\n"
+                "• 🗺️ **Gráfica de Regiones:** Pídeme *'grafica las regiones con más sismos'* para comparar las zonas más activas.\n"
+                "• 🌋 **Gráfica de Profundidad:** Pídeme *'gráfica de profundidad de los sismos'* para ver niveles superficiales o profundos.\n"
+                "• 🌍 **Sismos Más Fuertes:** Pregúntame *'¿cuál fue el sismo más fuerte?'* o detalles de los eventos más recientes.\n"
+                "• 🌊 **Alertas de Tsunami:** Consulta sismos con potencial de afectación oceánica.\n\n"
+                "¿Qué evento sísmico o gráfica te gustaría consultar?"
             ),
             is_domain_pertinent=True,
             sources=[],
@@ -130,7 +155,21 @@ def chat_with_agent(payload: ChatMessageRequest, user: UserProfile = Depends(req
         )
 
     # =========================================================================
-    # 3. Guardrail: Semantic Domain Relevance Check
+    # 3. Guardrail: Prohibition of Internal Architecture / Lakehouse / Capas
+    # =========================================================================
+    for pat in FORBIDDEN_TECH_PATTERNS:
+        if re.search(pat, safe_question, re.IGNORECASE):
+            logger.info(f"Rejected technical/architecture query from {user.username}: {safe_question}")
+            return ChatMessageResponse(
+                reply=ARCHITECTURE_REJECTION_MESSAGE,
+                is_domain_pertinent=False,
+                sources=[],
+                model="sismowatch_domain_filter",
+                security_flags={"verified_safe": True}
+            )
+
+    # =========================================================================
+    # 4. Guardrail: Semantic Domain Relevance Check (Seismic & Charts only)
     # =========================================================================
     q_lower = safe_question.lower()
     is_pertinent = any(k in q_lower for k in DOMAIN_KEYWORDS)
@@ -309,7 +348,7 @@ def synthesize_grounded_answer_and_chart(
             }]
         }
         answer = (
-            f"He generado la **gráfica interactiva de distribución de magnitudes** con los datos de la capa Gold:\n\n"
+            f"He generado la **gráfica interactiva de distribución de magnitudes** con los eventos sísmicos registrados:\n\n"
             f"• **Micro (<2.0 M):** {mag_dist.get('micro', 0)} sismos (baja percepción).\n"
             f"• **Menor (2.0 - 3.9 M):** {mag_dist.get('menor', 0)} sismos.\n"
             f"• **Moderado (4.0 - 5.4 M):** {mag_dist.get('moderado', 0)} sismos.\n"
@@ -338,7 +377,7 @@ def synthesize_grounded_answer_and_chart(
         top_str = ", ".join([f"**{r['region']}** ({r['count']} eventos)" for r in top_regions[:3]])
         answer = (
             f"Las zonas geográficas con mayor recurrencia sísmica detectadas por SismoWatch son: {top_str}.\n\n"
-            f"Adjunto una **gráfica comparativa** de las regiones más activas normalizadas a partir de los datos crudos del USGS."
+            f"Adjunto una **gráfica comparativa** de las zonas con mayor actividad sísmica."
         )
         return answer, chart
 
@@ -385,21 +424,10 @@ def synthesize_grounded_answer_and_chart(
                 None
             )
 
-    # Case E: Lakehouse architecture and pipeline
-    if "arquitectura" in q_lower or "pipeline" in q_lower or "lakehouse" in q_lower or "capas" in q_lower:
-        return (
-            "La arquitectura de SismoWatch implementa un patrón **Lakehouse Híbrido Gobernado**:\n\n"
-            "1. **Bronze (MinIO):** Ingesta inmutable de feeds GeoJSON cada 5 minutos (`sismowatch-bronze`).\n"
-            "2. **Silver (MinIO):** Transformaciones Parquet/JSON particionadas por año y mes (`sismowatch-silver`).\n"
-            "3. **Gold (PostgreSQL + MinIO):** Hechos curados (`fact_earthquake_events`), anomalías espaciales DBSCAN y base vectorial `pgvector`.\n"
-            "4. **Gobernanza:** Base de datos relacional limpia con cero cuarentena pasiva y auto-remediación en caliente.",
-            None
-        )
-
     # Default general response
     answer = (
-        f"Con base en la telemetría curada de SismoWatch:\n{context[:350]}...\n\n"
-        f"Todos los registros han sido validados con cero cuarentena pasiva y saneados contra inyección de instrucciones."
+        f"Resumen de actividad sísmica registrada:\n{context[:350]}...\n\n"
+        f"Puedes solicitar una gráfica interactiva de magnitudes, regiones o profundidad para visualizar estos datos."
     )
     return answer, None
 

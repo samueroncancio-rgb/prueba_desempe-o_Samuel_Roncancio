@@ -119,7 +119,7 @@ export default function App() {
   const [chatMessages, setChatMessages] = useState<Array<{ sender: 'user' | 'bot'; text: string; sources?: any[]; chart?: any; id?: string }>>([
     { 
       sender: 'bot', 
-      text: '¡Hola! 👋 Soy SismoBot, el agente de IA y análisis geofísico de SismoWatch. Puedo responder tus preguntas sobre sismos recientes, alertas de tsunami, anomalías espaciales y generar gráficas interactivas en vivo. ¿En qué puedo ayudarte hoy?' 
+      text: '¡Hola! 👋 Soy SismoBot, el agente de IA y análisis geofísico de SismoWatch. Puedo responder tus preguntas sobre sismos recientes, magnitudes, alertas de tsunami y generar gráficas interactivas en vivo. ¿En qué sismo o gráfica puedo ayudarte hoy?' 
     }
   ]);
   const [inputMessage, setInputMessage] = useState<string>('');
@@ -2266,10 +2266,10 @@ export default function App() {
                   🔥 Sismo más fuerte
                 </button>
                 <button
-                  onClick={() => submitMessage('Explica la arquitectura Lakehouse Bronze, Silver y Gold')}
-                  className="px-2.5 py-1 bg-slate-800/80 hover:bg-slate-700 text-indigo-300 rounded-lg text-[11px] whitespace-nowrap transition border border-indigo-500/30"
+                  onClick={() => submitMessage('¿Hay alguna alerta de tsunami en los sismos recientes?')}
+                  className="px-2.5 py-1 bg-slate-800/80 hover:bg-slate-700 text-teal-300 rounded-lg text-[11px] whitespace-nowrap transition border border-teal-500/30"
                 >
-                  🏗️ Arquitectura
+                  🌊 Alertas Tsunami
                 </button>
               </div>
 
