@@ -1,0 +1,51 @@
+# Environment and Secrets
+.env
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node / Frontend
+node_modules/
+web/node_modules/
+web/dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Airflow local state & logs
+airflow/logs/
+airflow/*.pid
+airflow/airflow.cfg
+airflow/webserver_config.py
+
+# MinIO data
+minio_data/
+
+# OS files
+.DS_Store
+Thumbs.db
