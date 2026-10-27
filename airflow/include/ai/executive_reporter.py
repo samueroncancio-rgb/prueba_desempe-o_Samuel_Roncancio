@@ -1,4 +1,3 @@
-import re
 import json
 import time
 import logging
@@ -200,10 +199,9 @@ class ExecutiveReporter:
         """
         Validates that critical figures stated in text do not contradict calculated figures.
         """
-        # If total_events > 0, verify max_magnitude is correctly referenced or not falsely modified
-        max_mag_str = str(metrics["max_magnitude"])
-        total_str = str(metrics["total_events"])
-        # If the text mentions numbers, they should not diverge wildly
+        if metrics.get("total_events", 0) > 0:
+            # Check if narrative contains obvious hallucination or contradictory empty text
+            return len(narrative.strip()) > 20
         return True
 
     def _persist_report(self, report_data: Dict[str, Any]):

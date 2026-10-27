@@ -4,7 +4,7 @@ import logging
 import numpy as np
 import psycopg2
 from psycopg2.extras import execute_batch
-from typing import List, Dict, Any, Optional
+from typing import List, Optional
 
 from airflow.include.config import config
 

@@ -2,7 +2,7 @@ import io
 import csv
 import datetime
 from typing import Optional
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from psycopg2 import sql
 

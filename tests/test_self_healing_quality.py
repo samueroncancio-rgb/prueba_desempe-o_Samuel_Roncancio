@@ -1,4 +1,3 @@
-import pytest
 from airflow.include.quality.self_healing_validator import SelfHealingValidator
 
 def test_auto_healing_inverted_coordinates():
@@ -22,7 +21,7 @@ def test_auto_healing_inverted_coordinates():
         }
     }
 
-    is_valid, record, rejection_reason = SelfHealingValidator.validate_and_heal_event(corrupt_feature)
+    is_valid, record, _rejection_reason = SelfHealingValidator.validate_and_heal_event(corrupt_feature)
     assert is_valid is True
     assert record is not None
     assert record["is_auto_healed"] is True

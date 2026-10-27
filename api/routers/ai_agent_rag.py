@@ -1,8 +1,6 @@
-import re
-import json
 import logging
 from typing import List, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 
 from api.auth.jwt_handler import require_viewer
 from api.schemas.pydantic_models import UserProfile, ChatMessageRequest, ChatMessageResponse

@@ -1,4 +1,3 @@
-import pytest
 from airflow.include.quality.self_healing_validator import SelfHealingValidator, sanitize_text
 
 def test_sanitize_text_anti_prompt_injection():
