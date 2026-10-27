@@ -2,7 +2,7 @@ import json
 import logging
 import datetime
 import os
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import psycopg2
 from psycopg2.extras import execute_batch
 
@@ -44,13 +44,8 @@ SEISMIC_EVENT_SCHEMA = StructType([
 class MedallionETLJob:
     """
     Executes the Distributed Medallion Pipeline using Apache PySpark:
-    1. Reads Bronze raw GeoJSON from MinIO Object Storage.
-    2. Runs SelfHealingValidator & PySpark DataFrame transformations.
-    3. Calculates Gutenberg-Richter energy and partitions data.
-    4. Persists clean, deduplicated data as Parquet into MinIO Silver.
-    5. Persists curated facts and metrics into MinIO GOLD (Data Lake).
-    6. Upserts curated records into PostgreSQL GOLD Serving Layer (gold.fact_earthquake_events).
-    7. Records pipeline health, auto-healing actions, and quarantine audits in Gold.
+    - Bronze to Silver: Raw GeoJSON -> Self-Healing & PySpark DataFrame -> MinIO Silver Parquet.
+    - Silver to Gold: MinIO Silver -> PySpark Aggregations -> MinIO Gold + PostgreSQL Gold UPSERT.
     """
     def __init__(self, db_conn_str: str = None):
         self.db_conn_str = db_conn_str or config.get_postgres_uri(role="spark")
@@ -88,23 +83,25 @@ class MedallionETLJob:
                 .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false") \
                 .getOrCreate()
 
-    def run_pipeline(self, bronze_object_name: str, dag_id: str = "spark_medallion_job") -> Dict[str, Any]:
-        logger.info(f"Starting Medallion PySpark ETL for Bronze object: {bronze_object_name}")
-        
-        # 1. Read Bronze from MinIO Data Lake
+    def run_bronze_to_silver(self, bronze_object_name: str, dag_id: str = "dag_02_spark_bronze_to_silver") -> Dict[str, Any]:
+        """
+        DAG 02: Reads raw GeoJSON from MinIO Bronze, applies Self-Healing and PySpark transformations,
+        and persists clean partitioned Parquet/JSON data in MinIO Silver.
+        """
+        logger.info(f"DAG 02: Starting Bronze-to-Silver PySpark ETL for {bronze_object_name}")
         raw_bytes = lakehouse_client.get_object(config.minio_bucket_bronze, bronze_object_name)
         payload = json.loads(raw_bytes.decode("utf-8"))
         features = payload.get("features", [])
-        logger.info(f"Extracted {len(features)} features from MinIO Bronze.")
+        logger.info(f"DAG 02: Extracted {len(features)} features from MinIO Bronze.")
 
-        # 2. In-Memory Validation & Self-Healing
+        # Validation & Self-Healing
         validation_results = SelfHealingValidator.process_batch(features, dag_id=dag_id)
         valid_records = validation_results["valid_records"]
         quarantine_records = validation_results["quarantine_records"]
         metrics = validation_results["metrics"]
 
-        # 3. Distributed Processing via PySpark DataFrame
-        spark = self.get_spark_session()
+        # PySpark Processing
+        spark = self.get_spark_session(app_name="SismoWatch-Bronze-To-Silver")
         spark_processed_count = 0
         try:
             spark_rows = [
@@ -129,40 +126,80 @@ class MedallionETLJob:
                 }
                 for r in valid_records
             ]
-
             if spark_rows:
                 df = spark.createDataFrame(spark_rows, schema=SEISMIC_EVENT_SCHEMA)
-                # Compute Gutenberg-Richter seismic energy: E = 10^(4.8 + 1.5 * M)
                 df = df.withColumn("energy_joules", F.pow(F.lit(10.0), 4.8 + 1.5 * F.col("mag")))
-                # Deduplicate by event_id
                 df = df.dropDuplicates(["event_id"])
                 now = datetime.datetime.now(datetime.timezone.utc)
                 df = df.withColumn("year", F.lit(now.year)).withColumn("month", F.lit(f"{now.month:02d}"))
                 spark_processed_count = df.count()
-                logger.info(f"PySpark DataFrame successfully computed {spark_processed_count} curated records.")
+                logger.info(f"DAG 02: PySpark computed {spark_processed_count} Silver records.")
         except Exception as spark_err:
-            logger.warning(f"PySpark stage notice: {spark_err}")
+            logger.warning(f"DAG 02: PySpark note: {spark_err}")
 
-        # 4. Save to MinIO Silver Layer (Partitioned Data Lake)
+        # Persist to MinIO Silver Layer
         timestamp_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
         silver_object_name = f"events_parquet/year={datetime.datetime.now().year}/month={datetime.datetime.now().month:02d}/silver_{timestamp_str}.json"
         
-        silver_payload = json.dumps([
-            {k: (v.isoformat() if isinstance(v, datetime.datetime) else v) for k, v in r.items()}
-            for r in valid_records
-        ])
+        silver_payload = json.dumps({
+            "source_bronze": bronze_object_name,
+            "timestamp": timestamp_str,
+            "metrics": metrics,
+            "quarantine_records": quarantine_records,
+            "records": [
+                {k: (v.isoformat() if isinstance(v, datetime.datetime) else v) for k, v in r.items()}
+                for r in valid_records
+            ]
+        })
         lakehouse_client.put_object(config.minio_bucket_silver, silver_object_name, silver_payload)
-        logger.info(f"Successfully persisted {len(valid_records)} records to MinIO Silver: {silver_object_name}")
+        lakehouse_client.put_object(config.minio_bucket_silver, "events_parquet/latest_silver.json", silver_payload)
+        logger.info(f"DAG 02: Successfully persisted {len(valid_records)} records to MinIO Silver: {silver_object_name}")
 
-        # 5. Save to MinIO GOLD Layer (Curated Datasets, Quality Audits & Aggregations)
+        return {
+            "status": "SUCCESS",
+            "spark_version": spark.version,
+            "bronze_source": bronze_object_name,
+            "silver_destination": silver_object_name,
+            "total_processed": metrics["total_records"],
+            "silver_records_count": len(valid_records),
+            "auto_healed_count": metrics["auto_healed_records"],
+            "quarantined_count": len(quarantine_records),
+            "quality_score": metrics["quality_score"]
+        }
+
+    def run_silver_to_gold(self, silver_object_name: str, dag_id: str = "dag_03_spark_silver_to_gold") -> Dict[str, Any]:
+        """
+        DAG 03: Reads clean dataset from MinIO Silver, computes Gold aggregations with PySpark,
+        persists Gold datasets in MinIO, and upserts facts and metadata into PostgreSQL Gold.
+        """
+        logger.info(f"DAG 03: Starting Silver-to-Gold PySpark ETL for {silver_object_name}")
+        raw_bytes = lakehouse_client.get_object(config.minio_bucket_silver, silver_object_name)
+        silver_data = json.loads(raw_bytes.decode("utf-8"))
+        
+        valid_records = silver_data.get("records", [])
+        quarantine_records = silver_data.get("quarantine_records", [])
+        metrics = silver_data.get("metrics", {
+            "dag_id": dag_id,
+            "total_records": len(valid_records),
+            "passed_records": len(valid_records),
+            "auto_healed_records": sum(1 for r in valid_records if r.get("is_auto_healed")),
+            "quarantined_records": len(quarantine_records),
+            "quality_score": 100.0,
+            "freshness_seconds": 0.0,
+            "rules_evaluated": []
+        })
+
+        spark = self.get_spark_session(app_name="SismoWatch-Silver-To-Gold")
+
+        # Save to MinIO GOLD Layer
         now = datetime.datetime.now(datetime.timezone.utc)
+        timestamp_str = now.strftime("%Y%m%d_%H%M%S")
         gold_object_name = f"curated_events/year={now.year}/month={now.month:02d}/gold_events_{timestamp_str}.json"
         
         mags = [float(r["mag"]) for r in valid_records if r.get("mag") is not None]
         gold_summary = {
             "batch_timestamp": now.isoformat(),
             "spark_engine_version": spark.version,
-            "source_bronze": bronze_object_name,
             "source_silver": silver_object_name,
             "total_curated_events": len(valid_records),
             "max_magnitude": max(mags) if mags else 0.0,
@@ -171,10 +208,7 @@ class MedallionETLJob:
             "tsunami_alerts_count": sum(1 for r in valid_records if r.get("tsunami_alert")),
             "deep_events_count": sum(1 for r in valid_records if float(r.get("depth_km", 0)) > 100),
             "quality_score": metrics["quality_score"],
-            "events": [
-                {k: (v.isoformat() if isinstance(v, datetime.datetime) else v) for k, v in r.items()}
-                for r in valid_records
-            ]
+            "events": valid_records
         }
         gold_payload = json.dumps(gold_summary, indent=2)
         lakehouse_client.put_object(config.minio_bucket_gold, gold_object_name, gold_payload)
@@ -197,22 +231,35 @@ class MedallionETLJob:
             f"quality_runs/quality_run_{timestamp_str}.json",
             json.dumps(metrics, indent=2)
         )
-        logger.info(f"Successfully persisted Gold layer datasets to MinIO: {gold_object_name}")
+        logger.info(f"DAG 03: Successfully persisted Gold layer datasets to MinIO: {gold_object_name}")
 
-        # 6. Load into PostgreSQL GOLD Serving Layer (Idempotent UPSERT of facts and metadata)
+        # Upsert into PostgreSQL GOLD Serving Layer
         self._upsert_to_gold(valid_records, quarantine_records, metrics)
 
         return {
             "status": "SUCCESS",
             "spark_version": spark.version,
-            "bronze_source": bronze_object_name,
-            "silver_destination": silver_object_name,
+            "silver_source": silver_object_name,
             "gold_destination": gold_object_name,
-            "total_processed": metrics["total_records"],
-            "gold_upserted": len(valid_records),
-            "auto_healed": metrics["auto_healed_records"],
-            "quarantined": len(quarantine_records),
+            "total_curated_events": len(valid_records),
             "quality_score": metrics["quality_score"]
+        }
+
+    def run_pipeline(self, bronze_object_name: str, dag_id: str = "spark_medallion_job") -> Dict[str, Any]:
+        """Convenience end-to-end execution combining bronze_to_silver and silver_to_gold."""
+        res_silver = self.run_bronze_to_silver(bronze_object_name, dag_id=f"{dag_id}_silver")
+        res_gold = self.run_silver_to_gold(res_silver["silver_destination"], dag_id=f"{dag_id}_gold")
+        return {
+            "status": "SUCCESS",
+            "spark_version": res_silver["spark_version"],
+            "bronze_source": bronze_object_name,
+            "silver_destination": res_silver["silver_destination"],
+            "gold_destination": res_gold["gold_destination"],
+            "total_processed": res_silver["total_processed"],
+            "gold_upserted": res_gold["total_curated_events"],
+            "auto_healed": res_silver["auto_healed_count"],
+            "quarantined": res_silver["quarantined_count"],
+            "quality_score": res_silver["quality_score"]
         }
 
     def _upsert_to_gold(self, valid_records: List[Dict[str, Any]], quarantine_records: List[Dict[str, Any]], metrics: Dict[str, Any]):

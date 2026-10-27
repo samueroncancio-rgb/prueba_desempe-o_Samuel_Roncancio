@@ -1,7 +1,5 @@
-
-
 """
-# DAG 03: Inteligencia Artificial, Detección de Anomalías y Actualización RAG
+# DAG 04: Inteligencia Artificial, Detección de Anomalías y Actualización RAG
 
 Este DAG corre de manera diaria (y bajo demanda desde la API de administración):
 1. Ejecuta analítica de Machine Learning (DBSCAN + Isolation Forest) para detectar
@@ -22,7 +20,7 @@ from airflow.include.ai.executive_reporter import ExecutiveReporter
 from airflow.include.ai.rag_indexer import RAGIndexer
 from airflow.include.error_handler import on_failure_alert
 
-logger = logging.getLogger("airflow.dag_03_ai_reports_and_rag")
+logger = logging.getLogger("airflow.dag_04_ai_reports_and_rag")
 
 default_args = {
     "owner": "sismowatch_ai_engineer",
@@ -35,7 +33,7 @@ default_args = {
 }
 
 @dag(
-    dag_id="dag_03_ai_reports_and_rag",
+    dag_id="dag_04_ai_reports_and_rag",
     default_args=default_args,
     description="Analítica de anomalías sísmicas (DBSCAN), reporte ejecutivo LLM y vectorización RAG",
     schedule="@daily",

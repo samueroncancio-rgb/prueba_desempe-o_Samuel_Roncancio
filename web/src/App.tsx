@@ -2086,15 +2086,22 @@ export default function App() {
                   </div>
                   <div className="p-3 bg-slate-950 rounded-lg flex items-center justify-between border border-slate-800">
                     <div>
-                      <span className="font-mono font-bold text-emerald-400">dag_02_spark_silver_gold</span>
-                      <p className="text-slate-400 text-[11px]">Dataset trigger: MinIO Bronze &rarr; MinIO Silver (Parquet) &rarr; PostgreSQL Gold (UPSERT).</p>
+                      <span className="font-mono font-bold text-cyan-400">dag_02_spark_bronze_to_silver</span>
+                      <p className="text-slate-400 text-[11px]">Transformación PySpark distribuida & Auto-Remediación: MinIO Bronze &rarr; MinIO Silver (Parquet).</p>
+                    </div>
+                    <span className="px-2 py-0.5 bg-cyan-500/20 text-cyan-400 rounded text-[10px]">Dataset Trigger</span>
+                  </div>
+                  <div className="p-3 bg-slate-950 rounded-lg flex items-center justify-between border border-slate-800">
+                    <div>
+                      <span className="font-mono font-bold text-indigo-400">dag_03_spark_silver_to_gold</span>
+                      <p className="text-slate-400 text-[11px]">Curación, agregados de calidad y UPSERT idempotente: MinIO Silver &rarr; MinIO Gold y PostgreSQL Gold.</p>
                     </div>
                     <span className="px-2 py-0.5 bg-indigo-500/20 text-indigo-400 rounded text-[10px]">Dataset Trigger</span>
                   </div>
                   <div className="p-3 bg-slate-950 rounded-lg flex items-center justify-between border border-slate-800">
                     <div>
-                      <span className="font-mono font-bold text-emerald-400">dag_03_ai_reports_and_rag</span>
-                      <p className="text-slate-400 text-[11px]">DBSCAN anomalías, informe ejecutivo LLM y vectorización pgvector para RAG.</p>
+                      <span className="font-mono font-bold text-purple-400">dag_04_ai_reports_and_rag</span>
+                      <p className="text-slate-400 text-[11px]">DBSCAN anomalías sísmicas, informe ejecutivo LLM y vectorización pgvector para RAG.</p>
                     </div>
                     <span className="px-2 py-0.5 bg-purple-500/20 text-purple-400 rounded text-[10px]">Daily @ 00:00</span>
                   </div>
