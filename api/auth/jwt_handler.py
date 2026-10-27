@@ -1,6 +1,6 @@
 import datetime
 from typing import Optional
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import jwt
 from passlib.context import CryptContext
@@ -38,14 +38,23 @@ def verify_token(token: str) -> dict:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_bearer)) -> UserProfile:
-    if not credentials or not credentials.credentials:
+def get_current_user(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_bearer)
+) -> UserProfile:
+    token = None
+    if credentials and credentials.credentials:
+        token = credentials.credentials
+    elif "token" in request.query_params:
+        token = request.query_params.get("token")
+
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Autenticación requerida. Token no provisto.",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    token_data = verify_token(credentials.credentials)
+    token_data = verify_token(token)
     return UserProfile(username=token_data["username"], role=token_data["role"])
 
 def require_viewer(current_user: UserProfile = Depends(get_current_user)) -> UserProfile:
