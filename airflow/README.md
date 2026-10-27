@@ -23,8 +23,9 @@ El módulo de **Apache Airflow 2.9** orquesta el ciclo de vida completo de los d
 airflow/
 ├── dags/                                 # Definición de DAGs de Airflow
 │   ├── dag_01_usgs_ingestion_bronze.py   # Ingesta cruda continua USGS -> MinIO Bronze
-│   ├── dag_02_spark_silver_gold.py       # Spark Medallion ETL, Self-Healing -> Silver/Gold
-│   └── dag_03_ai_reports_and_rag.py      # ML DBSCAN, Reportes LLM y pgvector RAG
+│   ├── dag_02_spark_bronze_to_silver.py  # Spark Medallion Bronze -> Silver Parquet + Auto-Curación
+│   ├── dag_03_spark_silver_to_gold.py    # Spark Medallion Silver -> MinIO Gold & Postgres Gold
+│   └── dag_04_ai_reports_and_rag.py      # ML DBSCAN, Reportes LLM y pgvector RAG
 ├── include/                              # Lógica de negocio reutilizable y utilidades
 │   ├── ai/                               # Motores de IA, clustering y embeddings
 │   │   ├── anomaly_detector.py           # Detección de enjambres sísmicos (DBSCAN + Energía)
@@ -57,25 +58,33 @@ airflow/
   * Reintentos automáticos con backoff exponencial mediante políticas de reintento de Airflow (3 reintentos, delay de 15s) y timeouts estrictos.
   * Preservación del payload exacto sin mutaciones para garantizar la inmutabilidad histórica.
 
-### DAG 02: Procesamiento Medallion Silver y Gold (Spark & Auto-Curación)
-* **Archivo:** [`airflow/dags/dag_02_spark_silver_gold.py`](file:///home/cohorte5/Música/prueba_desempeño_Samuel_Roncancio/airflow/dags/dag_02_spark_silver_gold.py)
+### DAG 02: Procesamiento PySpark Bronze hacia MinIO Silver (Auto-Curación)
+* **Archivo:** [`airflow/dags/dag_02_spark_bronze_to_silver.py`](file:///home/cohorte5/Música/prueba_desempeño_Samuel_Roncancio/airflow/dags/dag_02_spark_bronze_to_silver.py)
 * **Disparador:** Disparado reactivamente por el dataset `Dataset("s3a://sismowatch-bronze/latest")`.
-* **Emisión de Dataset:** `Dataset("postgres://.../gold/fact_earthquake_events")`.
+* **Emisión de Dataset:** `Dataset("s3a://sismowatch-silver/latest")`.
 * **Flujo Operativo:**
   1. Lee el último GeoJSON depositado en MinIO Bronze.
-  2. Invoca el job [`MedallionETLJob`](file:///home/cohorte5/Música/prueba_desempeño_Samuel_Roncancio/airflow/include/spark_jobs/medallion_etl.py) mediante Apache PySpark.
-  3. Ejecuta el [`SelfHealingValidator`](file:///home/cohorte5/Música/prueba_desempeño_Samuel_Roncancio/airflow/include/quality/self_healing_validator.py):
+  2. Ejecuta el [`SelfHealingValidator`](file:///home/cohorte5/Música/prueba_desempeño_Samuel_Roncancio/airflow/include/quality/self_healing_validator.py):
      * Detecta e intercambia ejes invertidos si $|lat| > 90$ y $|lon| \le 90$.
      * Sanitiza el campo `place` eliminando patrones de Prompt Injection y etiquetas peligrosas.
      * Imputa profundidad y magnitud mediana cuando sea necesario.
      * Marca `is_auto_healed = TRUE` y documenta la acción.
+  3. Ejecuta PySpark para desanidar, normalizar y calcular energía Gutenberg-Richter.
   4. Escribe el dataset columnar limpio y particionado en formato **Parquet** en `s3a://sismowatch-silver/`.
-  5. Realiza un **UPSERT idempotente** masivo en la tabla de PostgreSQL [`gold.fact_earthquake_events`](file:///home/cohorte5/Música/prueba_desempeño_Samuel_Roncancio/db/init/03_tables_and_indexes.sql#L7).
-  6. Registra la auditoría de calidad y salud del pipeline en `gold.fact_quality_and_healing_runs`.
-  7. Registra registros irrecuperables en `gold.fact_quarantine_events`.
 
-### DAG 03: Inteligencia Artificial, Detección de Anomalías y RAG
-* **Archivo:** [`airflow/dags/dag_03_ai_reports_and_rag.py`](file:///home/cohorte5/Música/prueba_desempeño_Samuel_Roncancio/airflow/dags/dag_03_ai_reports_and_rag.py)
+### DAG 03: Curación y Agregación PySpark Silver hacia PostgreSQL Gold
+* **Archivo:** [`airflow/dags/dag_03_spark_silver_to_gold.py`](file:///home/cohorte5/Música/prueba_desempeño_Samuel_Roncancio/airflow/dags/dag_03_spark_silver_to_gold.py)
+* **Disparador:** Disparado reactivamente por el dataset `Dataset("s3a://sismowatch-silver/latest")`.
+* **Emisión de Dataset:** `Dataset("postgres://.../gold/fact_earthquake_events")`.
+* **Flujo Operativo:**
+  1. Lee los eventos limpios en formato Parquet/JSON desde MinIO Silver.
+  2. Computa métricas agregadas y analíticas Gold en MinIO (`sismowatch-gold`).
+  3. Realiza un **UPSERT idempotente** masivo en la Serving Layer de PostgreSQL ([`gold.fact_earthquake_events`](file:///home/cohorte5/Música/prueba_desempeño_Samuel_Roncancio/db/init/03_tables_and_indexes.sql#L7)).
+  4. Registra la auditoría de calidad y salud del pipeline en `gold.fact_quality_and_healing_runs`.
+  5. Enruta registros con corrupción irrecuperable a `gold.fact_quarantine_events`.
+
+### DAG 04: Inteligencia Artificial, Detección de Anomalías y RAG
+* **Archivo:** [`airflow/dags/dag_04_ai_reports_and_rag.py`](file:///home/cohorte5/Música/prueba_desempeño_Samuel_Roncancio/airflow/dags/dag_04_ai_reports_and_rag.py)
 * **Frecuencia:** `0 6 * * *` (Diario a las 06:00 UTC) y bajo demanda desde la Serving API.
 * **Componentes:**
   1. **Detección de Anomalías ([`AnomalyDetector`](file:///home/cohorte5/Música/prueba_desempeño_Samuel_Roncancio/airflow/include/ai/anomaly_detector.py)):**

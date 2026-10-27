@@ -5,19 +5,53 @@
 
 ---
 
-## 1. Propósito de la Arquitectura y Visión General
+## 1. Visión General del Proyecto
 
-**SismoWatch** convierte el feed público y volátil del Servicio Geológico de los Estados Unidos (USGS) en un producto de datos empresarial seguro, continuo, con calidad auditada y enriquecido con Inteligencia Artificial.
+**SismoWatch Enterprise** es una plataforma de ingeniería de datos, analítica e Inteligencia Artificial de alto rendimiento que ingesta de forma continua el feed público de la API del Servicio Geológico de los Estados Unidos (USGS), procesando eventos telúricos a escala planetaria bajo el patrón de arquitectura **Medallion Lakehouse**.
 
-### Decisiones Críticas Habilitadas
-* **Disponibilidad Inmutable:** Resuelve la volatilidad del feed USGS persistiendo el 100% de los datos crudos en formato inmutable en el Data Lake (MinIO).
-* **Restricción Arquitectónica de Base de Datos (Regla de Oro):** Para maximizar la velocidad analítica y evitar la sobrecarga y bloat de tablas en PostgreSQL, **la base de datos relacional NO contiene tablas de Bronze ni de Silver**. El Data Lake MinIO aloja las capas Bronze (GeoJSON) y Silver (Parquet), mientras que PostgreSQL actúa estrictamente como **Serving Layer conteniendo únicamente las tablas de hechos curados de la capa GOLD (`gold.fact_earthquake_events`) y la base vectorial `pgvector`**.
-* **Zero-Quarantine & Self-Healing:** En sismología crítica, un sismo con coordenadas invertidas o texto malicioso no se envía a morir a una cuarentena pasiva: el motor `SelfHealingValidator` lo auto-remedia en vuelo (`swap(lat, lon)`), imputa valores nulos y audita la acción en `is_auto_healed = TRUE`.
-* **IA Confiable y RAG Estricto:** Detección de anomalías espaciales (`DBSCAN`), reportes ejecutivos gobernados donde el 100% de las cifras numéricas son calculadas por SQL/Python con validación determinista anti-alucinaciones, y un Agente conversacional RAG sobre `pgvector` protegido por guardrails semánticos.
+La plataforma provee a centros de operaciones de emergencia, analistas de riesgo y equipos ejecutivos telemetría en tiempo casi real con latencias sub-segundo, visualización cartográfica geoespacial, cálculo determinista de calidad de datos con auto-curación (*Zero-Quarantine*), detección de enjambres anómalos vía Machine Learning y un Asistente Conversacional RAG gobernado con citas factuales y gráficos dinámicos.
 
 ---
 
-## 2. Diagrama de Arquitectura y Capas Medallion
+## 2. Mapa de Navegación del Repositorio (Módulos y READMEs)
+
+Para facilitar el estudio, auditoría y mantenimiento del proyecto, cada componente cuenta con su documentación técnica exhaustiva:
+
+| Módulo | Documentación Específica | Rol y Responsabilidad Principal |
+| :--- | :--- | :--- |
+| **Orquestación** | [📘 `airflow/README.md`](file:///home/cohorte5/Música/prueba_desempeño_Samuel_Roncancio/airflow/README.md) | DAGs de Airflow 2.9, Data-Aware Datasets, conectores MinIO y motores en `airflow/include/`. |
+| **Serving API** | [📗 `api/README.md`](file:///home/cohorte5/Música/prueba_desempeño_Samuel_Roncancio/api/README.md) | FastAPI, RBAC JWT (Admin / Viewer), Server-Sent Events (SSE) y Agente RAG. |
+| **Cómputo Distribuido** | [📙 `spark/README.md`](file:///home/cohorte5/Música/prueba_desempeño_Samuel_Roncancio/spark/README.md) | Clúster Apache Spark 3.5 (Master/Worker), conectores S3A y PostgreSQL JDBC, transformaciones Parquet. |
+| **Base de Datos & Vectores**| [📕 `db/README.md`](file:///home/cohorte5/Música/prueba_desempeño_Samuel_Roncancio/db/README.md) | PostgreSQL 16 + pgvector, índice HNSW 768d, DDL de esquemas y regla de oro (Solo Gold). |
+| **Frontend Web** | [💻 `web/README.md`](file:///home/cohorte5/Música/prueba_desempeño_Samuel_Roncancio/web/README.md) | SPA React 19 + TypeScript + Leaflet + Tailwind CSS + Lucide + Chatbot SismoBot. |
+| **Aseguramiento de Calidad**| [🧪 `tests/README.md`](file:///home/cohorte5/Música/prueba_desempeño_Samuel_Roncancio/tests/README.md) | Suite de 19 pruebas `pytest`, validación AST, pruebas de auto-curación y escaneos de seguridad. |
+| **Centro de Documentación** | [📚 `docs/README.md`](file:///home/cohorte5/Música/prueba_desempeño_Samuel_Roncancio/docs/README.md) | Hub consolidado de especificaciones, decisiones arquitectónicas (ADRs) y glosario. |
+
+---
+
+## 3. Principios y Decisiones Arquitectónicas Clave
+
+### A. Regla de Oro de Almacenamiento (Aislamiento Lakehouse)
+Para evitar la sobrecarga y el *table bloat* característico de las bases de datos relacionales al almacenar payloads crudos masivos:
+* **Bronze (GeoJSON crudo e inmutable):** Reside exclusivamente en MinIO S3 (`s3a://sismowatch-bronze/`).
+* **Silver (Parquet estructurado, limpio y particionado):** Reside exclusivamente en MinIO S3 (`s3a://sismowatch-silver/`).
+* **Gold (Serving Layer Relacional + pgvector):** **PostgreSQL almacena estrictamente los hechos analíticos curados en el esquema `gold`** y los vectores semánticos en `gold.rag_knowledge_base`.
+* **Cero Tablas Bronze/Silver en PostgreSQL:** No existen tablas crudas intermedias en la base relacional, garantizando que el motor SQL dedique el 100% de su memoria a consultas de sub-segundo para la Serving API.
+
+### B. Política Zero-Quarantine y Auto-Curación (Self-Healing)
+En sismología, un registro con coordenadas invertidas o metadatos nulos no se abandona en una tabla de cuarentena pasiva. El motor [`SelfHealingValidator`](file:///home/cohorte5/Música/prueba_desempeño_Samuel_Roncancio/airflow/include/quality/self_healing_validator.py) ejecuta:
+1. **Inversión Inteligente de Ejes:** Si $|lat| > 90$ y $|lon| \le 90$, intercambia los valores (`swap(lat, lon)`), marca el evento con `is_auto_healed = true` y documenta `healing_action = 'SWAPPED_INVERTED_COORDINATES'`.
+2. **Imputación Estadística:** Asigna la mediana histórica a magnitudes o profundidades faltantes.
+3. **Sanitización Anti-Prompt Injection:** Limpia expresiones adversarias en el campo `place` antes de su ingreso al Lakehouse o al modelo de lenguaje.
+4. **Cuarentena Estricta como Excepción:** Solo registros con corrupción irrecuperable (sin ID de evento o geometrías vacías) son enviados a `gold.fact_quarantine_events` para auditoría administrativa.
+
+### C. IA Confiable Anti-Alucinación y RAG Estricto
+* **Reporte Ejecutivo Diario:** El 100% de las métricas (`total_events`, `max_magnitude`, `avg_magnitude`, `tsunami_alerts`) son computadas por SQL/Python. El LLM sintetiza la narrativa ejecutiva y una verificación determinista posterior compara las cifras. Si existe discrepancia o caída de red, se activa el fallback por plantilla Jinja2.
+* **Agente RAG SismoBot (`pgvector`):** Utiliza representaciones vectoriales densas de 768 dimensiones indexadas con el algoritmo `HNSW` (`vector_cosine_ops`). Cuenta con una triple barrera de guardrails que filtra de inmediato preguntas fuera del dominio de sismología y operaciones de la plataforma.
+
+---
+
+## 4. Diagrama Global de Arquitectura
 
 ```
 +-----------------------------------------------------------------------------------------+
@@ -28,9 +62,10 @@
                                              v
 +-----------------------------------------------------------------------------------------+
 |                           APACHE AIRFLOW 2.9 (ORQUESTACIÓN)                             |
-|  - dag_01_usgs_ingestion_bronze.py (*/5 min, escribe en MinIO Bronze, Dataset Trigger)  |
-|  - dag_02_spark_silver_gold.py     (Self-Healing, MinIO Silver Parquet, Postgres Gold)  |
-|  - dag_03_ai_reports_and_rag.py    (DBSCAN Swarms, LLM Reporte, Indexación pgvector)    |
+|  - dag_01_usgs_ingestion_bronze.py   (*/5 min, escribe MinIO Bronze, Dataset Trigger)   |
+|  - dag_02_spark_bronze_to_silver.py  (Self-Healing, MinIO Silver Parquet Snappy)        |
+|  - dag_03_spark_silver_to_gold.py    (MinIO Gold y UPSERT PostgreSQL Gold)               |
+|  - dag_04_ai_reports_and_rag.py      (DBSCAN Swarms, LLM Reporte, Indexación pgvector)  |
 +--------------------------------------------+--------------------------------------------+
                                              |
                   +--------------------------+--------------------------+
@@ -43,8 +78,9 @@
 |   (GeoJSON crudo inmutable)       |                 |  gold.fact_quality_and_healing    |
 | [SILVER]: s3a://sismowatch-silver |                 |  gold.fact_quarantine_events      |
 |   (Parquet limpio particionado)   |                 |  gold.ai_daily_reports            |
-|                                   |                 |  gold.ai_anomalies (DBSCAN)       |
-| * SIN TABLAS EN POSTGRESQL *      |                 |  gold.rag_knowledge_base (768d)   |
+| [GOLD]:   s3a://sismowatch-gold   |                 |  gold.ai_anomalies (DBSCAN)       |
+|   (Parquet analítico curado)      |                 |  gold.rag_knowledge_base (768d)   |
+| * SIN TABLAS EN POSTGRESQL *      |                 |                                   |
 +-----------------------------------+                 +-----------------+-----------------+
                                                                         |
                                               +-------------------------+
@@ -54,133 +90,150 @@
 |                        FASTAPI BACKEND + FRONTEND REACT & LEAFLET                       |
 |  - Auth JWT (Viewer / Admin)             - KPIs en tiempo real                          |
 |  - Server-Sent Events (/api/stream)      - Mapa Leaflet interactivo                     |
-|  - Agente RAG (/api/agent/chat)          - Exportación CSV / PDF                        |
-|  - Panel Admin Cuarentena / Backfill     - Estados de carga, error y vacío              |
+|  - Agente RAG (/api/agent/chat)          - Exportación CSV / Streaming                  |
+|  - Panel Admin Cuarentena / Backfill     - SismoBot con renderizado de gráficos         |
 +-----------------------------------------------------------------------------------------+
 ```
 
 ---
 
-## 3. Puesta en Marcha Rápida (Un Solo Comando)
+## 5. Puesta en Marcha Rápida (Un Solo Comando)
 
 ### Prerrequisitos
 * Docker y Docker Compose (v2.20+)
-* Puerto 8080 (Airflow), 8000 (API), 3000 (Web), 5432 (Postgres), 9000/9001 (MinIO) disponibles.
+* Puertos libres en el host: `3000` (Web), `8000` (API), `8080` (Airflow), `8085` (Spark UI), `9000/9001` (MinIO), `5433` (PostgreSQL).
 
-### 1. Clonar el repositorio y configurar variables de entorno
+### Paso 1: Configurar Variables de Entorno
 ```bash
-git clone <tu-repo-url>
-cd prueba_desempeño_Samuel_Roncancio
-
-# Copiar el archivo de plantilla a .env
+# Copiar plantilla base de configuración
 cp .env.example .env
 ```
 
-### 2. Levantar toda la plataforma
+### Paso 2: Desplegar la Plataforma con Docker Compose
 ```bash
 docker compose up -d
 ```
 
-### 3. URLs de acceso
+### Paso 3: URLs y Accesos del Sistema
 | Servicio | URL Local | Credenciales por Defecto |
 | :--- | :--- | :--- |
-| **Plataforma Web (Dashboard)** | `http://localhost:3000` | **Admin:** `admin@sismowatch.com` / `AdminSecurePass2026!`<br/>**Viewer:** `viewer@sismowatch.com` / `ViewerPass2026!` |
-| **Documentación API (FastAPI)** | `http://localhost:8000/docs` | Probar endpoints protegidos con token Bearer |
-| **Apache Airflow** | `http://localhost:8080` | `airflow_admin` / `airflow_super_secure_pass_2026` |
-| **MinIO Console (Data Lake)** | `http://localhost:9001` | `minioadmin` / `miniopassword2026` |
+| **Plataforma Web (Dashboard SPA)** | [`http://localhost:3000`](http://localhost:3000) | **Admin:** `admin@sismowatch.com` / `AdminSecurePass2026!`<br/>**Viewer:** `viewer@sismowatch.com` / `ViewerPass2026!` |
+| **Documentación Interactiva Swagger** | [`http://localhost:8000/docs`](http://localhost:8000/docs) | Probar endpoints de la Serving API con token Bearer |
+| **Apache Airflow Webserver** | [`http://localhost:8080`](http://localhost:8080) | `airflow_admin` / `airflow_super_secure_pass_2026` |
+| **Spark Master Web UI** | [`http://localhost:8085`](http://localhost:8085) | Monitoreo del clúster de cómputo distribuido |
+| **MinIO Object Storage Console** | [`http://localhost:9001`](http://localhost:9001) | `minioadmin` / `miniopassword2026` |
+| **PostgreSQL 16 (Serving DB)** | `localhost:5433` (`db: sismowatch_db`) | `sismowatch_admin` / `sismowatch_secure_pass_2026` |
 
 ---
 
-## 4. Calidad de Datos y Política "Cero Cuarentena"
+## 6. Seguridad Integral y Mínimo Privilegio
 
-### Herramienta Elegida y Justificación
-Se implementó un motor personalizado de alta velocidad (`SelfHealingValidator`), combinable con Pandera y Great Expectations, enfocado en **Auto-Remediación Determinista en Vuelo**:
-1. **Inversión de Coordenadas (`swap(lat, lon)`):** Si $|lat| > 90$ y $|lon| \le 90$, el motor intercambia los ejes y marca `is_auto_healed = TRUE`, evitando que sismos válidos se pierdan en una cuarentena pasiva.
-2. **Imputación de Valores Faltantes:** Si la profundidad o magnitud viene nula, se calcula e imputa el valor mediano de la estación marcando la acción de auto-curación.
-3. **Sanitización Anti-Prompt Injection:** Limpieza estricta con regex sobre `properties.place` para eliminar cualquier instrucción adversaria antes de ingresar al Lakehouse o al LLM.
-4. **Controles de Frescura y Volumen:** Se mide en cada micro-batch el desfase temporal contra el tiempo real y el volumen esperado de sismos.
-5. **Auditoría de Calidad:** Cada corrida registra su score en `gold.fact_quality_and_healing_runs`, visible en el dashboard. Solo los registros con corrupción irrecuperable (sin ID o coordenadas imposibles) pasan a `gold.fact_quarantine_events` para auditoría administrativa.
-
----
-
-## 5. Seguridad Integral y Mínimo Privilegio
-
-1. **Gestión de Secretos:** 0 credenciales en código duro. Todo se gestiona mediante `.env` (ignorado en `.gitignore`), variables de entorno en Docker y Fernet Keys personalizadas en Airflow.
-2. **Mínimo Privilegio en PostgreSQL:**
-   * `role_spark_etl`: Escritura exclusiva en `gold`.
-   * `role_api_reader`: Solo lectura (`SELECT`) en `gold`.
-   * **No existen esquemas ni tablas Bronze/Silver en la base de datos.**
-3. **Plataforma y RBAC:** Tokens JWT con expiración. Un usuario con rol `viewer` que invoque endpoints de backfill o cuarentena recibe `403 Forbidden`.
-4. **Evidencia de Escaneo de Seguridad Automatizado:**
+1. **Gestión de Secretos:** 0 credenciales quemadas en código fuente. Todo es inyectado mediante `.env` (ignorado en `.gitignore`), variables de entorno Docker y Fernet Keys criptográficas.
+2. **Roles de Mínimo Privilegio en PostgreSQL:**
+   * `role_spark_etl`: Escritura y actualización restringida exclusivamente al esquema `gold` y vistas `curated`.
+   * `role_api_reader`: Solo lectura (`SELECT`) en el esquema `gold`, utilizado por la Serving API.
+   * **Inexistencia total de esquemas Bronze y Silver en la base de datos relacional.**
+3. **Plataforma y RBAC:** Autenticación con tokens JWT con vencimiento configurable. Un usuario con rol `viewer` que intente ejecutar acciones de backfill histórico o auditoría de cuarentena recibe respuesta inmediata `403 Forbidden`.
+4. **Evidencia de Auditorías de Seguridad Automatizadas:**
    * **Bandit (Análisis Estático de Código Python):**
      ```text
      [main] INFO running on Python 3.12.3
-     Run started: 2026-10-27 12:18:51
      Test results:
          No issues identified.
      Total lines of code: 1943
      Issues: 0 High, 0 Medium, 0 Low.
      ```
-   * **pip-audit (Vulnerabilidades en Dependencias):**
+   * **pip-audit (Vulnerabilidades en Dependencias de Terceros):**
      ```text
      No known vulnerabilities found.
      ```
 
 ---
 
-## 6. Automatización con Inteligencia Artificial
+## 7. Suite de Pruebas Automatizadas (`pytest`)
 
-### 1. Detección de Anomalías Sísmicas (`DBSCAN` + Energía)
-* **Enjambres Sísmicos:** Aplica el algoritmo `DBSCAN` con distancia `haversine` ($\epsilon = 100\text{ km}$, $\text{min\_samples} = 3$) sobre las coordenadas de los sismos en las últimas 72 horas para detectar clústeres espaciales densos.
-* **Picos Energéticos:** Detecta eventos con magnitudes inusuales ($\ge 5.5\text{ M}$) y genera una narrativa de impacto sísmico en `gold.ai_anomalies`.
+Toda la funcionalidad de la plataforma está cubierta por pruebas unitarias y de integración:
 
-### 2. Generación de Reporte Diario Ejecutivo Anti-Alucinación
-* **Regla Inquebrantable:** El 100% de las métricas (`total_events`, `max_magnitude`, `avg_magnitude`, `tsunami_alerts`) son calculadas por SQL y Python.
-* **Validación Post-LLM:** Se verifica que las cifras en el texto generado coincidan con las calculadas. Si el LLM altera un número o si la API falla, entra en acción el **Plan Alterno Determinista (Jinja2)**.
-
-### 3. Agente Conversacional RAG (`pgvector`)
-* Embeddings de 768 dimensiones almacenados en `gold.rag_knowledge_base` con índice `HNSW` (`vector_cosine_ops`).
-* **Triple Barrera de Guardrails:** Bloqueo semántico inmediato de preguntas fuera del dominio de SismoWatch (recetas, deportes, código ajeno) devolviendo la respuesta protocolar establecida.
-* Citación obligatoria de IDs de eventos y fechas de reportes.
-
----
-
-## 7. Plataforma de Consumo y Tiempo Real (SSE)
-
-* **¿Por qué Server-Sent Events (SSE) y no WebSockets o Polling largo?**  
-  La telemetría sísmica es unidireccional (del pipeline al cliente). SSE opera nativamente sobre HTTP estándar, consume menos memoria que una conexión WebSocket bidireccional y ofrece reconexión automática en el navegador (`EventSource`) con latencia sub-segundo cuando Spark finaliza la carga en Gold.
-* **Diseño UI/UX:** Construido en React + TypeScript + Tailwind CSS con mapa Leaflet interactivo, badge pulsante **"EN VIVO"**, filtros dinámicos, visor de reportes con descarga CSV y drawer interactivo de chat con **SismoBot**.
-* **Manejo de Estados:** Skeletons de carga, estados vacíos estilizados y manejo de errores sin pantallas en blanco.
-
----
-
-## 8. Suite de Pruebas Automatizadas (`pytest`)
-
-Ejecución de la suite completa con un solo comando:
 ```bash
-# Desde la raíz del proyecto con el entorno virtual activado:
-pytest -v
+# Ejecución completa desde la raíz del repositorio:
+.venv/bin/pytest -v
 ```
 
-### Resultados de la Suite (14 de 14 Pruebas Exitosas):
-* `tests/test_transformations.py`:
-  * Aplanado de GeoJSON y extracción de coordenadas.
-  * Sanitización contra Prompt Injection en el campo `place`.
-* `tests/test_dag_integrity.py`:
-  * Integridad de sintaxis y estructura AST de los 3 DAGs de Airflow sin ciclos ni errores de importación.
-* `tests/test_self_healing_quality.py`:
-  * Auto-curación de coordenadas invertidas (`SWAPPED_INVERTED_COORDINATES`).
-  * Enrutamiento de registros irrecuperables a cuarentena.
-  * Cálculo exacto del score de calidad en lote.
-* `tests/test_api_rbac_and_rag.py`:
-  * Verificación de `401 Unauthorized` ante peticiones sin token.
-  * Verificación de `403 Forbidden` cuando un `viewer` intenta llamar a `/api/quality/quarantine` o `/api/admin/backfill`.
-  * Verificación del Guardrail de dominio del Agente RAG (rechazo de preguntas ajenas y aceptación de consultas sísmicas).
+### Resultados de la Suite (20 de 20 Pruebas Exitosas):
+```text
+tests/test_api_rbac_and_rag.py::test_unauthenticated_request_returns_401 PASSED
+tests/test_api_rbac_and_rag.py::test_viewer_access_to_admin_quarantine_returns_403 PASSED
+tests/test_api_rbac_and_rag.py::test_viewer_access_to_admin_backfill_returns_403 PASSED
+tests/test_rag_agent_rejects_out_of_domain_query PASSED
+tests/test_rag_agent_accepts_pertinent_seismic_query PASSED
+tests/test_rag_agent_rejects_architecture_and_lakehouse_query PASSED
+tests/test_rag_agent_recognizes_greetings PASSED
+tests/test_rag_agent_blocks_prompt_injection PASSED
+tests/test_rag_agent_blocks_xss_attacks PASSED
+tests/test_rag_agent_generates_interactive_chart PASSED
+tests/test_dag_integrity.py::test_dag_files_exist PASSED
+tests/test_dag_syntax_and_ast_integrity[dag_01_usgs_ingestion_bronze.py] PASSED
+tests/test_dag_syntax_and_ast_integrity[dag_02_spark_bronze_to_silver.py] PASSED
+tests/test_dag_syntax_and_ast_integrity[dag_03_spark_silver_to_gold.py] PASSED
+tests/test_dag_syntax_and_ast_integrity[dag_04_ai_reports_and_rag.py] PASSED
+tests/test_self_healing_quality.py::test_auto_healing_inverted_coordinates PASSED
+tests/test_quarantine_irrecoverable_record PASSED
+tests/test_self_healing_quality.py::test_batch_quality_metrics_and_score PASSED
+tests/test_transformations.py::test_sanitize_text_anti_prompt_injection PASSED
+tests/test_transformations.py::test_geojson_to_clean_event_transformation PASSED
+
+======================== 20 passed in 0.48s ========================
+```
 
 ---
 
-## 9. Limitaciones Conocidas y Mejoras a Futuro
+## 8. Estructura de Directorios del Repositorio
 
-1. **Escala Cloud con Apache Iceberg:** En un entorno enterprise a gran escala, migraríamos MinIO a Amazon S3 con formato Apache Iceberg para gestión de metadatos ACID y Time Travel nativo.
-2. **Ingesta Sub-segundo con Apache Kafka:** Integrar un bus de streaming Kafka para recibir feeds telemétricos directamente desde sensores sísmicos IoT antes de MinIO Bronze.
-3. **Text-to-SQL Dinámico Multi-Tabla:** Expandir la herramienta de Text-to-SQL del Agente con validación semántica AST avanzada mediante `sqlglot` para consultas analíticas complejas en lenguaje natural.
+```
+.
+├── README.md                                                        # Documentación maestra del proyecto
+├── docker-compose.yml                                               # Orquestación multicontenedor (Postgres, MinIO, Spark, Airflow, API, Web)
+├── .env.example                                                     # Plantilla de variables de entorno seguras
+├── airflow/                                                         # Módulo de orquestación Airflow 2.9
+│   ├── README.md                                                    # Documentación de Airflow y componentes include
+│   ├── Dockerfile                                                   # Imagen Airflow + Java + PySpark + JARs
+│   ├── requirements.txt                                             # Dependencias de Python para Airflow
+│   ├── dags/                                                        # Definiciones de DAGs (01, 02, 03)
+│   └── include/                                                     # Lógica de negocio, MinIO, PySpark, Self-Healing e IA
+├── api/                                                             # Módulo de Serving API (FastAPI)
+│   ├── README.md                                                    # Documentación de endpoints, RBAC y SSE
+│   ├── Dockerfile                                                   # Imagen de despliegue de FastAPI
+│   ├── main.py                                                      # Entrypoint de la aplicación
+│   ├── db.py                                                        # Conexión psycopg2 con rol role_api_reader
+│   ├── auth/                                                        # Manejo de tokens JWT y RBAC
+│   ├── routers/                                                     # Rutas de dashboard, telemetría SSE, calidad y RAG
+│   └── schemas/                                                     # Modelos de validación Pydantic
+├── spark/                                                           # Módulo de cómputo distribuido
+│   ├── README.md                                                    # Documentación del clúster Spark 3.5 y jobs Medallion
+│   └── Dockerfile                                                   # Imagen del clúster con conectores S3A y PostgreSQL JDBC
+├── db/                                                              # Módulo de base de datos relacional y vectorial
+│   ├── README.md                                                    # Documentación del esquema Gold, roles e índices HNSW
+│   └── init/                                                        # Scripts DDL de inicialización (01, 02, 03)
+├── web/                                                             # Módulo de Frontend Web SPA
+│   ├── README.md                                                    # Documentación de la SPA React 19 + Leaflet
+│   ├── Dockerfile                                                   # Contenedor de compilación y servicio
+│   ├── package.json                                                 # Dependencias de npm
+│   └── src/                                                         # Código fuente React, componentes y SismoBot
+├── tests/                                                           # Módulo de pruebas de regresión automatizadas
+│   ├── README.md                                                    # Documentación de la suite pytest y casos de prueba
+│   ├── test_dag_integrity.py                                        # Pruebas AST de DAGs
+│   ├── test_transformations.py                                      # Pruebas de transformación y desanidado
+│   ├── test_self_healing_quality.py                                 # Pruebas de auto-curación y calidad
+│   └── test_api_rbac_and_rag.py                                     # Pruebas de seguridad, RBAC y guardrails RAG
+└── docs/                                                            # Centro de documentación técnica
+    ├── README.md                                                    # Portal de documentación y glosario
+    └── ARQUITECTURA.md                                              # Especificación técnica formal detallada
+```
+
+---
+
+## 9. Hoja de Ruta y Mejoras Futuras
+
+1. **Evolución a Apache Iceberg:** Migrar el almacenamiento Silver en MinIO a formato de tabla abierta **Apache Iceberg**, habilitando *Time Travel*, evolución de esquema sin downtime y transacciones ACID nativas a escala petabyte.
+2. **Ingesta Sub-segundo vía Apache Kafka:** Incorporar un bus de eventos Kafka intermedio para recibir feeds telemétricos directamente desde sismógrafos IoT antes de su persistencia en MinIO Bronze.
+3. **Validación Semántica Text-to-SQL con AST:** Expandir las capacidades de consulta en lenguaje natural de SismoBot implementando validadores semánticos con `sqlglot` para restringir aún más las consultas dinámicas a tablas seguras.
