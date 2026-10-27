@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { 
   Activity, Shield, AlertTriangle, Database, Bot, RefreshCw, 
   Download, LogOut, CheckCircle2, XCircle, Search, Filter, 
-  MapPin, Send, Server, Sparkles, User, Info, ArrowRight
+  MapPin, Send, Server, Sparkles, User, Info, ArrowRight, Globe, Navigation
 } from 'lucide-react';
 
 const API_BASE = 'http://localhost:8000';
@@ -51,6 +53,20 @@ export default function App() {
 
   // Leaflet map ref
   const mapRef = useRef<any>(null);
+  const markersGroupRef = useRef<any>(null);
+
+  const focusOnEvent = (ev: any) => {
+    if (mapRef.current && ev.latitude != null && ev.longitude != null) {
+      mapRef.current.flyTo([ev.latitude, ev.longitude], 6, { duration: 1.5 });
+      document.getElementById('map-world-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
+  const resetWorldView = () => {
+    if (mapRef.current) {
+      mapRef.current.flyTo([20, 0], 2, { duration: 1.2 });
+    }
+  };
 
   const saveSession = (sess: UserSession | null) => {
     setSession(sess);
@@ -182,52 +198,99 @@ export default function App() {
     };
   }, [session]);
 
-  // Initialize Leaflet Map
+  // Initialize Leaflet Map with World View and Red Location Markers
   useEffect(() => {
-    if (activeTab === 'dashboard' && events.length > 0 && (window as any).L) {
-      const L = (window as any).L;
-      const mapContainer = document.getElementById('map-container');
-      if (mapContainer) {
-        if (!mapRef.current) {
-          mapRef.current = L.map('map-container').setView([20, 0], 2);
-          L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
-          }).addTo(mapRef.current);
-        }
+    if (activeTab !== 'dashboard') return;
 
-        // Clear existing markers
-        mapRef.current.eachLayer((layer: any) => {
-          if (layer instanceof L.CircleMarker) {
-            mapRef.current.removeLayer(layer);
-          }
-        });
+    const mapContainer = document.getElementById('map-container');
+    if (!mapContainer) return;
 
-        // Add markers
-        events.forEach(ev => {
-          const color = ev.mag >= 5.5 ? '#ef4444' : ev.mag >= 4.0 ? '#f59e0b' : '#10b981';
-          const radius = Math.max(4, ev.mag * 2.5);
-          L.circleMarker([ev.latitude, ev.longitude], {
-            radius: radius,
-            fillColor: color,
-            color: '#fff',
-            weight: 1,
-            opacity: 0.9,
-            fillOpacity: 0.7
-          })
-          .bindPopup(`
-            <div style="color: #1e293b; font-size: 12px;">
-              <strong>${ev.place_sanitized}</strong><br/>
-              <b>Magnitud:</b> ${ev.mag} M<br/>
-              <b>Profundidad:</b> ${ev.depth_km} km<br/>
-              <b>Alerta Tsunami:</b> ${ev.tsunami_alert ? 'Sí' : 'No'}<br/>
-              <b>Estado:</b> ${ev.is_auto_healed ? 'Auto-Curado' : 'Validado'}<br/>
-              <small>${new Date(ev.event_time).toLocaleString()}</small>
-            </div>
-          `)
-          .addTo(mapRef.current);
-        });
-      }
+    if (!mapRef.current) {
+      const map = L.map('map-container', {
+        center: [20, 0],
+        zoom: 2,
+        minZoom: 1.5,
+        maxZoom: 18,
+        worldCopyJump: true
+      });
+
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+        subdomains: 'abcd',
+        maxZoom: 19
+      }).addTo(map);
+
+      const markersGroup = L.layerGroup().addTo(map);
+      markersGroupRef.current = markersGroup;
+      mapRef.current = map;
     }
+
+    // Refresh markers with accurate red location points
+    if (markersGroupRef.current) {
+      markersGroupRef.current.clearLayers();
+
+      events.forEach((ev: any) => {
+        if (ev.latitude == null || ev.longitude == null) return;
+
+        // Custom red location point with pulsating radar glow
+        const redPinIcon = L.divIcon({
+          className: 'sismowatch-red-marker',
+          html: `
+            <div style="position: relative; display: flex; align-items: center; justify-content: center; width: 34px; height: 34px;">
+              <span class="sismo-red-pulse" style="position: absolute; width: 28px; height: 28px; border-radius: 50%; background-color: rgba(239, 68, 68, 0.45);"></span>
+              <span style="position: absolute; width: 18px; height: 18px; border-radius: 50%; background-color: rgba(220, 38, 38, 0.65);"></span>
+              <div style="position: relative; width: 12px; height: 12px; border-radius: 50%; background-color: #ef4444; border: 2.5px solid #ffffff; box-shadow: 0 0 10px rgba(239, 68, 68, 1);"></div>
+            </div>
+          `,
+          iconSize: [34, 34],
+          iconAnchor: [17, 17],
+          popupAnchor: [0, -16]
+        });
+
+        const marker = L.marker([ev.latitude, ev.longitude], { icon: redPinIcon });
+
+        // Seismic shockwave halo in transparent red
+        const shockwave = L.circleMarker([ev.latitude, ev.longitude], {
+          radius: Math.max(12, (ev.mag || 1) * 4.5),
+          color: '#ef4444',
+          weight: 1.5,
+          opacity: 0.85,
+          fillColor: '#ef4444',
+          fillOpacity: 0.18
+        });
+
+        const popupContent = `
+          <div style="font-family: system-ui, -apple-system, sans-serif; color: #f8fafc; padding: 4px; min-width: 210px;">
+            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px;">
+              <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background-color: #ef4444; box-shadow: 0 0 6px #ef4444;"></span>
+              <strong style="font-size: 13px; color: #f87171; text-transform: uppercase; letter-spacing: 0.5px;">Epicentro Sísmico</strong>
+            </div>
+            <div style="font-size: 13px; font-weight: 600; color: #ffffff; margin-bottom: 6px; line-height: 1.4;">
+              ${ev.place_sanitized || 'Ubicación no especificada'}
+            </div>
+            <div style="font-size: 11px; line-height: 1.6; color: #cbd5e1; border-top: 1px solid #334155; padding-top: 6px;">
+              <div><b>Coordenadas:</b> <span style="font-family: monospace; color: #38bdf8;">${Number(ev.latitude).toFixed(4)}°, ${Number(ev.longitude).toFixed(4)}°</span></div>
+              <div><b>Magnitud:</b> <span style="color: #ef4444; font-weight: 800; font-size: 12px;">${ev.mag} ${ev.mag_type || 'M'}</span></div>
+              <div><b>Profundidad:</b> ${ev.depth_km} km</div>
+              <div><b>Alerta Tsunami:</b> ${ev.tsunami_alert ? '<span style="color: #ef4444; font-weight: bold;">⚠️ SÍ</span>' : 'No'}</div>
+              <div><b>Hora:</b> ${new Date(ev.event_time).toLocaleString()}</div>
+              <div><b>Estado:</b> <span style="color: #34d399; font-weight: 600;">${ev.is_auto_healed ? 'Auto-Curado en vuelo' : 'Limpio en Gold'}</span></div>
+            </div>
+          </div>
+        `;
+
+        marker.bindPopup(popupContent);
+        shockwave.bindPopup(popupContent);
+
+        markersGroupRef.current?.addLayer(shockwave);
+        markersGroupRef.current?.addLayer(marker);
+      });
+    }
+
+    setTimeout(() => {
+      mapRef.current?.invalidateSize();
+    }, 150);
+
   }, [activeTab, events]);
 
   // Send RAG Chat Message
@@ -461,21 +524,9 @@ export default function App() {
               className={`w-full flex items-center space-x-2.5 px-3 py-2.5 rounded-lg text-xs font-medium transition ${activeTab === 'admin' ? 'bg-purple-600 text-white font-semibold' : 'text-purple-400 hover:bg-slate-800 hover:text-purple-300'}`}
             >
               <Shield className="w-4 h-4" />
-              <span>Panel Admin & Cuarentena</span>
+              <span>Panel Admin</span>
             </button>
           )}
-
-          <div className="pt-6 mt-6 border-t border-slate-800/80">
-            <div className="p-3 bg-slate-800/50 rounded-lg border border-slate-700/40">
-              <div className="flex items-center space-x-1.5 text-xs font-semibold text-emerald-400 mb-1">
-                <Database className="w-3.5 h-3.5" />
-                <span>Base de Datos Limpia</span>
-              </div>
-              <p className="text-[11px] text-slate-400 leading-relaxed">
-                PostgreSQL contiene estrictamente los <b>hechos curados de GOLD</b>. Bronze y Silver residen en MinIO.
-              </p>
-            </div>
-          </div>
         </aside>
 
         {/* Content Area */}
@@ -531,71 +582,113 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Map & Filters Section */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-4">
-                  <div className="flex items-center justify-between mb-3">
+              {/* World Map Section - Mapa Mundi Completo en Tiempo Real */}
+              <div id="map-world-section" className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-2xl space-y-4">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+                  <div>
                     <div className="flex items-center space-x-2">
-                      <MapPin className="w-4 h-4 text-emerald-400" />
-                      <h2 className="text-sm font-bold text-white">Mapa Geoespacial de Sismos en Tiempo Real</h2>
+                      <Globe className="w-5 h-5 text-red-500 animate-pulse" />
+                      <h2 className="text-base font-bold text-white tracking-wide">
+                        Mapa Mundi de Monitoreo Sísmico Global en Tiempo Real
+                      </h2>
                     </div>
-                    <span className="text-xs text-slate-400">{events.length} sismos proyectados</span>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Ubicación exacta con marcadores georreferenciados en color rojo y halos de propagación sísmica
+                    </p>
                   </div>
-                  <div id="map-container" className="h-80 w-full rounded-lg overflow-hidden bg-slate-950 border border-slate-800" />
+
+                  <div className="flex items-center space-x-2.5">
+                    <span className="px-3 py-1 bg-red-500/10 border border-red-500/30 rounded-full text-xs text-red-400 font-semibold flex items-center space-x-1.5">
+                      <span className="w-2 h-2 rounded-full bg-red-500 animate-ping"></span>
+                      <span>{events.length} sismos proyectados</span>
+                    </span>
+
+                    <button
+                      onClick={resetWorldView}
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-medium transition flex items-center space-x-1.5 shadow-sm"
+                      title="Restablecer zoom y centrar en el mapa del mundo completo"
+                    >
+                      <Navigation className="w-3.5 h-3.5 text-sky-400" />
+                      <span>Vista Mundial Completa</span>
+                    </button>
+                  </div>
                 </div>
 
-                {/* Filter Controls Card */}
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-4">
-                  <div className="flex items-center space-x-2">
-                    <Filter className="w-4 h-4 text-emerald-400" />
-                    <h3 className="text-sm font-bold text-white">Filtros Operativos</h3>
-                  </div>
+                {/* Full-Width World Map Container */}
+                <div className="relative rounded-xl overflow-hidden border border-slate-800 bg-slate-950">
+                  <div id="map-container" className="h-[520px] w-full z-0" />
 
-                  <div>
-                    <label className="text-xs text-slate-400 font-medium block mb-1">
-                      Magnitud Mínima: <span className="text-white font-bold">{minMag} M</span>
-                    </label>
-                    <input 
-                      type="range" 
-                      min="0" 
-                      max="8" 
-                      step="0.5" 
-                      value={minMag}
-                      onChange={e => setMinMag(parseFloat(e.target.value))}
-                      className="w-full accent-emerald-500 cursor-pointer"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-xs text-slate-400 font-medium block mb-1">Buscar por Región</label>
-                    <div className="relative">
-                      <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-slate-500" />
-                      <input 
-                        type="text" 
-                        placeholder="Ej. Chile, California, Japón..." 
-                        value={regionFilter}
-                        onChange={e => setRegionFilter(e.target.value)}
-                        className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:outline-none focus:border-emerald-500"
-                      />
+                  {/* On-Map Legend Overlay */}
+                  <div className="absolute bottom-4 right-4 z-[400] bg-slate-900/90 backdrop-blur-md border border-slate-700/80 rounded-xl p-3 shadow-2xl text-[11px] space-y-1.5 max-w-xs pointer-events-auto">
+                    <div className="font-semibold text-slate-200 flex items-center space-x-1.5 border-b border-slate-800 pb-1">
+                      <MapPin className="w-3.5 h-3.5 text-red-400" />
+                      <span>Simbología Sísmica</span>
+                    </div>
+                    <div className="flex items-center space-x-2 text-slate-300">
+                      <span className="w-3 h-3 rounded-full bg-red-600 border border-white shadow"></span>
+                      <span>Punto rojo: Epicentro exacto</span>
+                    </div>
+                    <div className="flex items-center space-x-2 text-slate-400">
+                      <span className="w-3 h-3 rounded-full border border-red-500 bg-red-500/20"></span>
+                      <span>Halo rojo: Radio de energía</span>
+                    </div>
+                    <div className="text-[10px] text-slate-400 italic pt-0.5">
+                      * Haz clic en cualquier punto rojo o en la tabla para ubicar.
                     </div>
                   </div>
+                </div>
+              </div>
 
-                  <div className="pt-4 border-t border-slate-800">
-                    <a
-                      href={`${API_BASE}/api/reports/export?format=csv`}
-                      className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold flex items-center justify-center space-x-2 transition border border-slate-700"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                      <span>Exportar Telemetría Curada (CSV)</span>
-                    </a>
+              {/* Filters & Export Bar */}
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+                <div>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="text-xs text-slate-400 font-medium">Magnitud Mínima</label>
+                    <span className="text-xs text-red-400 font-bold font-mono">{minMag} M</span>
                   </div>
+                  <input 
+                    type="range" 
+                    min="0" 
+                    max="8" 
+                    step="0.5" 
+                    value={minMag}
+                    onChange={e => setMinMag(parseFloat(e.target.value))}
+                    className="w-full accent-red-500 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs text-slate-400 font-medium block mb-1">Buscar por Región o País</label>
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-500" />
+                    <input 
+                      type="text" 
+                      placeholder="Ej. California, Chile, Alaska, Japón..." 
+                      value={regionFilter}
+                      onChange={e => setRegionFilter(e.target.value)}
+                      className="w-full pl-9 pr-3 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:outline-none focus:border-red-500 transition"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-end">
+                  <a
+                    href={`${API_BASE}/api/reports/export?format=csv`}
+                    className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold flex items-center justify-center space-x-2 transition border border-slate-700 shadow-sm"
+                  >
+                    <Download className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Exportar Telemetría Curada (CSV)</span>
+                  </a>
                 </div>
               </div>
 
               {/* Curated Events Table */}
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-sm font-bold text-white">Hechos Limpios en GOLD (fact_earthquake_events)</h3>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">Hechos Limpios en GOLD (fact_earthquake_events)</h3>
+                    <p className="text-xs text-slate-400">Haz clic en cualquier fila para ubicar su epicentro en el mapa</p>
+                  </div>
                   <span className="text-xs text-emerald-400 font-mono">Deduplicado por UPSERT</span>
                 </div>
 
@@ -610,11 +703,16 @@ export default function App() {
                         <th className="p-3">Tsunami</th>
                         <th className="p-3">Fecha y Hora</th>
                         <th className="p-3">Auto-Curado</th>
+                        <th className="p-3 text-right">Acción</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/60 text-slate-300">
                       {events.map((ev: any) => (
-                        <tr key={ev.event_id} className="hover:bg-slate-800/40 transition">
+                        <tr 
+                          key={ev.event_id} 
+                          onClick={() => focusOnEvent(ev)}
+                          className="hover:bg-slate-800/60 transition cursor-pointer"
+                        >
                           <td className="p-3 font-mono text-emerald-400">{ev.event_id}</td>
                           <td className="p-3 font-bold">
                             <span className={`px-2 py-0.5 rounded text-[11px] ${ev.mag >= 5.0 ? 'bg-red-500/20 text-red-400 font-black' : 'bg-slate-800 text-white'}`}>
@@ -641,6 +739,19 @@ export default function App() {
                             ) : (
                               <span className="text-slate-500 text-[10px]">Limpio</span>
                             )}
+                          </td>
+                          <td className="p-3 text-right">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                focusOnEvent(ev);
+                              }}
+                              className="px-2.5 py-1 bg-red-600/20 hover:bg-red-600/40 text-red-400 border border-red-500/30 rounded text-[11px] font-medium transition inline-flex items-center space-x-1"
+                              title="Centrar mapa en este epicentro"
+                            >
+                              <MapPin className="w-3 h-3 text-red-400" />
+                              <span>Ubicar</span>
+                            </button>
                           </td>
                         </tr>
                       ))}
@@ -800,7 +911,7 @@ export default function App() {
             <div className="space-y-6">
               <div>
                 <h2 className="text-lg font-bold text-white">Panel de Administración y Control</h2>
-                <p className="text-xs text-slate-400">Acciones privilegiadas y auditoría de cuarentena.</p>
+                <p className="text-xs text-slate-400">Acciones privilegiadas del sistema y sincronización histórica.</p>
               </div>
 
               {/* Action Buttons */}
@@ -817,44 +928,6 @@ export default function App() {
                   <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                   <span>Lanzar Backfill de 30 días</span>
                 </button>
-              </div>
-
-              {/* Quarantined Records Table */}
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                <h3 className="text-sm font-bold text-white mb-2">Auditoría de Cuarentena (Registros Rechazados)</h3>
-                <p className="text-xs text-slate-400 mb-4">
-                  Eventos con fallos estructurales irrecuperables (coordenadas fuera de planeta o ID ausente).
-                </p>
-
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-950 text-slate-400 uppercase tracking-wider text-[10px]">
-                      <tr>
-                        <th className="p-3">ID Rechazo</th>
-                        <th className="p-3">Raw Event ID</th>
-                        <th className="p-3">Regla Violada</th>
-                        <th className="p-3">Motivo del Rechazo</th>
-                        <th className="p-3">Fecha</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800/60 text-slate-300 font-mono text-[11px]">
-                      {quarantineItems.map((q: any) => (
-                        <tr key={q.quarantine_id}>
-                          <td className="p-3 text-slate-400">{q.quarantine_id.slice(0, 8)}...</td>
-                          <td className="p-3 text-amber-400">{q.raw_event_id || 'N/A'}</td>
-                          <td className="p-3">{q.rule_violated}</td>
-                          <td className="p-3 text-red-400">{q.rejection_reason}</td>
-                          <td className="p-3 text-slate-500">{new Date(q.rejected_at).toLocaleString()}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {quarantineItems.length === 0 && (
-                    <div className="p-6 text-center text-emerald-400 text-xs">
-                      Excelente: 0 registros en cuarentena. La auto-remediación en vuelo ha curado el 100% de los datos.
-                    </div>
-                  )}
-                </div>
               </div>
             </div>
           )}
