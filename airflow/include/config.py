@@ -21,6 +21,9 @@ class SismoWatchConfig(BaseModel):
     minio_bucket_silver: str = os.getenv("MINIO_BUCKET_SILVER", "sismowatch-silver")
     minio_bucket_gold: str = os.getenv("MINIO_BUCKET_GOLD", "sismowatch-gold")
     
+    # Spark Cluster Configuration
+    spark_master_url: str = os.getenv("SPARK_MASTER_URL", "spark://spark-master:7077")
+
     # USGS API
     usgs_realtime_url: str = os.getenv("USGS_REALTIME_URL", "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson")
     usgs_query_url: str = os.getenv("USGS_QUERY_URL", "https://earthquake.usgs.gov/fdsnws/event/1/query")
